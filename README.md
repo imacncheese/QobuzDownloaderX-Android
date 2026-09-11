@@ -149,6 +149,20 @@ the plaintext one is the pair Qobuz actually publishes.
 If discovery ever fails, the login screen's **Advanced** section accepts a manually supplied
 `app_id` / `app_secret` pair.
 
+### Credential guard
+
+`scripts/check-secrets.ps1` scans every tracked file for GitHub tokens, private keys and literal
+`app_id` / `app_secret` values, and exits non-zero if it finds any. Install it as a pre-commit hook
+so a credential cannot be committed by accident:
+
+```bash
+cp scripts/check-secrets.ps1 .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+```powershell
+pwsh -File scripts/check-secrets.ps1
+```
+
 ## Building
 
 Requires JDK 17 and the Android SDK (platform 35, build-tools 35.0.0).
