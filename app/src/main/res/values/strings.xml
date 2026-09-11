@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QobuzDLX</string>
+    <string name="download_channel_name">Downloads</string>
+    <string name="download_channel_desc">Shows progress while music downloads from Qobuz</string>
+    <string name="cancel_all">Cancel all</string>
+    <string name="download_progress_summary">%1$d active, %2$d done, %3$d failed</string>
+
+    <!-- Login -->
+    <string name="login_title">Sign in to Qobuz</string>
+    <string name="login_subtitle">Sign in with your Qobuz account to download music.</string>
+    <string name="login_email">E-mail</string>
+    <string name="login_password">Password</string>
+    <string name="login_token">User auth token</string>
+    <string name="login_button">Sign in</string>
+    <string name="login_with_token">Use an auth token instead</string>
+    <string name="login_with_password">Use e-mail and password instead</string>
+    <string name="login_advanced">Advanced (custom API credentials)</string>
+    <string name="login_app_id">app_id (optional)</string>
+    <string name="login_app_secret">app_secret (optional)</string>
+    <string name="login_credentials_hint">Leave blank to fetch credentials automatically from the Qobuz web player.</string>
+    <string name="login_error">Sign-in failed</string>
+    <string name="logout">Sign out</string>
+
+    <!-- Navigation -->
+    <string name="nav_search">Search</string>
+    <string name="nav_downloads">Downloads</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Search -->
+    <string name="search_placeholder">Search artists, albums or tracks</string>
+    <string name="search_tab_albums">Albums</string>
+    <string name="search_tab_tracks">Tracks</string>
+    <string name="search_tab_artists">Artists</string>
+    <string name="search_empty">Nothing here yet — search for something above.</string>
+    <string name="search_no_results">No results for “%1$s”.</string>
+
+    <!-- Album -->
+    <string name="download_album">Download album</string>
+    <string name="download_track">Download</string>
+    <string name="loading_tracks">Loading tracks…</string>
+    <string name="album_no_tracks">This release has no streamable tracks.</string>
+    <string name="tracks_count">%1$d tracks</string>
+    <string name="hires_badge">Hi-Res</string>
+
+    <!-- Downloads -->
+    <string name="downloads_empty">No downloads yet.</string>
+    <string name="downloads_clear_finished">Clear finished</string>
+    <string name="download_retry">Retry</string>
+    <string name="download_cancel">Cancel</string>
+    <string name="status_queued">Queued</string>
+    <string name="status_resolving">Resolving stream…</string>
+    <string name="status_downloading">Downloading</string>
+    <string name="status_tagging">Tagging</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_cancelled">Cancelled</string>
+    <string name="saved_to">Saved to %1$s</string>
+
+    <!-- Settings -->
+    <string name="settings_quality">Download quality</string>
+    <string name="settings_quality_locked">Your Qobuz plan may not allow the highest tiers; the app automatically falls back to the best available quality.</string>
+    <string name="settings_folder">Download folder</string>
+    <string name="settings_folder_default">Downloads (default)</string>
+    <string name="settings_folder_pick">Choose folder…</string>
+    <string name="settings_folder_clear">Reset to default</string>
+    <string name="settings_templates">File naming</string>
+    <string name="settings_template_artist">Artist folder</string>
+    <string name="settings_template_album">Album folder</string>
+    <string name="settings_template_track">Track file name</string>
+    <string name="settings_templates_hint">Placeholders: %artistname%, %albumtitle%, %tracktitle%, %tracknumber%, %year%, %format%, %bitdepth%, %samplerate%, %label%, %albumgenre%, %isrc%, %upc%, %discnumber%, %tracktotal%</string>
+    <string name="settings_tags">Metadata tags</string>
+    <string name="settings_cover_file">Save Cover.jpg next to the tracks</string>
+    <string name="settings_embed_cover">Embed cover art in each file</string>
+    <string name="settings_concurrency">Simultaneous downloads</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_signed_in_as">Signed in as %1$s</string>
+    <string name="settings_subscription">Plan: %1$s</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_body">An Android client for Qobuz, ported from the QobuzDownloaderX (QBDLX) desktop application.\n\nNot affiliated with, endorsed by, or approved by Qobuz. The Qobuz name and brand are trademarks of their respective owner. You are responsible for complying with the Qobuz API Terms of Use and your local law.</string>
+
+    <string name="tag_album">Album title</string>
+    <string name="tag_album_artist">Album artist</string>
+    <string name="tag_artist">Track artist</string>
+    <string name="tag_composer">Composer</string>
+    <string name="tag_copyright">Copyright</string>
+    <string name="tag_label">Label</string>
+    <string name="tag_disc">Disc number</string>
+    <string name="tag_disc_total">Total discs</string>
+    <string name="tag_genre">Genre</string>
+    <string name="tag_isrc">ISRC</string>
+    <string name="tag_url">Qobuz URL</string>
+    <string name="tag_type">Release type</string>
+    <string name="tag_explicit">Explicit flag</string>
+    <string name="tag_title">Track title</string>
+    <string name="tag_track">Track number</string>
+    <string name="tag_track_total">Total tracks</string>
+    <string name="tag_upc">UPC / barcode</string>
+    <string name="tag_release_date">Release date</string>
+    <string name="tag_year">Year</string>
+    <string name="tag_comment">Comment</string>
+    <string name="tag_replaygain">ReplayGain</string>
+
+    <string name="not_signed_in">Not signed in</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>

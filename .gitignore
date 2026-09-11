@@ -1,0 +1,20 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+
+# Kotlin/Gradle scratch output
+.kotlin/
+
+# Signing material must never be committed: a published keystore with a known
+# password lets anyone sign an update for this application id.
+*.keystore
+*.jks
+keystore/

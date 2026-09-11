@@ -1,0 +1,91 @@
+# STATUS: NOT ACTIVE. This workflow needs a signing key before it can run.
+#
+# It stays inert until you add one repository secret, so nothing will
+# accidentally publish. To enable it, see the "Automatic releases" section of
+# the README: export keystore/local.keystore as base64 and store it as the
+# KEYSTORE_BASE64 secret. Until then the job exits early with a clear message.
+
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (for example v1.0.5)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Check for a signing key
+        id: key
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "::warning::KEYSTORE_BASE64 is not set, so no APK can be signed. See the Automatic releases section of the README."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 17
+        if: steps.key.outputs.available == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        if: steps.key.outputs.available == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        if: steps.key.outputs.available == 'true'
+        run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0" > /dev/null
+
+      - name: Decode signing key
+        if: steps.key.outputs.available == 'true'
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore/local.keystore
+
+      - name: Run unit tests
+        if: steps.key.outputs.available == 'true'
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build release APK
+        if: steps.key.outputs.available == 'true'
+        env:
+          QBdlxKeyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          QBdlxKeyAlias: ${{ secrets.KEY_ALIAS }}
+          QBdlxKeyPassword: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Resolve version
+        if: steps.key.outputs.available == 'true'
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "apk=app/build/outputs/apk/release/app-release.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to release
+        if: steps.key.outputs.available == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: QobuzDLX for Android ${{ steps.version.outputs.tag }}
+          body_path: CHANGELOG.md
+          files: ${{ steps.version.outputs.apk }}
+          fail_on_unmatched_files: true
