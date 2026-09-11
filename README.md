@@ -249,6 +249,10 @@ ui/           Compose screens: login, search, album, downloads, settings
   never leave a half-written or untagged file in your library.
 - **Quality degrades automatically.** If a track is not licensed at Hi-Res, the engine retries
   down the chain `27 → 7 → 6 → 5` rather than failing.
+- **Embedded artwork uses the largest available rendition.** Qobuz publishes each cover at several
+  sizes (`max`, `org`, `2048`, `1400`, `600`, …). The cover written into a file is permanent, so
+  the candidate list is ordered largest-first and probed until one returns real image bytes.
+  Change the size under *Settings → Embedded artwork size*; the desktop app offers the same list.
 - **Truncated downloads are rejected.** The engine compares bytes written against
   `Content-Length` and fails loudly instead of saving a corrupt file.
 - **Tags with no `FieldKey` in JAudioTagger** (copyright, full release date, ReplayGain) are written

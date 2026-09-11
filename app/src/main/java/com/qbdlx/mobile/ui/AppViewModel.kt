@@ -12,6 +12,7 @@ import com.qbdlx.mobile.api.QobuzClient
 import com.qbdlx.mobile.api.Track
 import com.qbdlx.mobile.api.TrackPage
 import com.qbdlx.mobile.di.AppGraph
+import com.qbdlx.mobile.download.ArtworkUrls
 import com.qbdlx.mobile.download.DownloadItem
 import com.qbdlx.mobile.download.DownloadQueue
 import com.qbdlx.mobile.download.DownloadService
@@ -330,6 +331,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setTrackTemplate(v: String) = settings.setTrackTemplate(v)
     fun setSaveCover(v: Boolean) = settings.setSaveCoverToFolder(v)
     fun setConcurrency(v: Int) = settings.setConcurrency(v)
+    fun setArtworkSize(size: ArtworkUrls.Size) = settings.setArtworkSize(size)
     fun setCustomTreeUri(uri: android.net.Uri?) = settings.setCustomTreeUri(uri)
     fun setTagOption(key: String, value: Boolean) = settings.setTagOption(key, value)
 

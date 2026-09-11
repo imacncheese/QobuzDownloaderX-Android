@@ -69,7 +69,7 @@ class DownloadEngine(
             DownloadQueue.update(item.id) { it.copy(status = DownloadStatus.TAGGING) }
 
             val coverBytes = if (config.tag.writeCoverArt || config.saveCoverToFolder) {
-                downloadCoverBytes(item).also {
+                downloadCoverBytes(item, config.artworkSize).also {
                     Log.i(TAG, "[${item.id}] cover art: ${it?.size ?: 0} bytes")
                 }
             } else {
@@ -275,29 +275,24 @@ class DownloadEngine(
     }
 
     /**
-     * Fetches cover art, trying the largest rendition first.
+     * Fetches cover art at the largest available rendition.
      *
-     * The desktop app only ever requests `_1400`, so a missing large image made
-     * artwork vanish silently (logged as "cover art: 0 bytes"). Here every known
-     * rendition is tried, including the album's own image, before giving up.
+     * The desktop app requests a single size and silently produced no artwork
+     * when that rendition was missing (logged as "cover art: 0 bytes"). Here the
+     * candidate list is ordered largest-first and probed until one returns real
+     * image bytes, so the embedded cover is the biggest copy Qobuz publishes for
+     * the release.
      */
-    private suspend fun downloadCoverBytes(item: DownloadItem): ByteArray? {
-        val candidates = linkedSetOf<String>()
-
-        fun add(url: String?) {
-            if (url.isNullOrBlank()) return
-            // Prefer the biggest available rendition of each distinct image.
-            candidates += url
-            candidates += url.replace(Regex("""_\d+\.jpg"""), "_1400.jpg")
-            candidates += url.replace(Regex("""_\d+\.jpg"""), "_600.jpg")
-            if (!url.contains("_")) candidates += url
-        }
-
-        add(item.coverUrl)
-        add(item.album?.image?.large)
-        add(item.album?.image?.small)
-        add(item.track?.album?.image?.large)
-        add(item.track?.album?.image?.small)
+    private suspend fun downloadCoverBytes(
+        item: DownloadItem,
+        preferred: ArtworkUrls.Size = ArtworkUrls.Size.MAX,
+    ): ByteArray? {
+        val candidates = ArtworkUrls.candidates(
+            coverUrl = item.coverUrl,
+            album = item.album,
+            track = item.track,
+            sizes = ArtworkUrls.defaultPreference(preferred),
+        )
 
         if (candidates.isEmpty()) {
             Log.w(TAG, "[${item.id}] no cover art URL on the album or track")
@@ -305,6 +300,8 @@ class DownloadEngine(
         }
 
         return withContext(Dispatchers.IO) {
+            var best: ByteArray? = null
+
             for (url in candidates) {
                 val bytes = runCatching {
                     val req = Request.Builder().url(url)
@@ -316,13 +313,29 @@ class DownloadEngine(
                     }
                 }.getOrNull()
 
-                if (bytes != null && bytes.isNotEmpty()) {
-                    Log.i(TAG, "[${item.id}] cover art ${bytes.size} bytes from $url")
-                    return@withContext bytes
+                if (!ArtworkUrls.looksLikeRealArtwork(bytes)) {
+                    Log.d(TAG, "[${item.id}] no usable artwork at $url")
+                    continue
                 }
+
+                val data = bytes!!
+                // The preference list already runs largest-first, so the first
+                // plausible hit is the biggest one this release offers.
+                best = data
+                Log.i(
+                    TAG,
+                    "[${item.id}] cover art ${data.size} bytes from $url",
+                )
+                break
             }
-            Log.w(TAG, "[${item.id}] could not fetch cover art from ${candidates.size} candidate URLs")
-            null
+
+            if (best == null) {
+                Log.w(
+                    TAG,
+                    "[${item.id}] no usable cover art across ${candidates.size} candidate URLs",
+                )
+            }
+            best
         }
     }
 

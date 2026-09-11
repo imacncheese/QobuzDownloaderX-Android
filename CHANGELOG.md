@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.6
+
+### Changed
+
+- **Embedded album art now uses the largest available rendition.** The previous code tried `_1400`
+  then `_600`, so covers were capped well below what Qobuz publishes. Candidate URLs are now
+  ordered largest-first (`max`, `org`, `2048`, `1400`, `1000`, `600`, …) and probed until one
+  returns real image bytes, matching the size list the desktop app offers.
+- Added a **Settings → Embedded artwork size** control, defaulting to Maximum available.
+
+### Fixed
+
+- **A placeholder response could be embedded as album art.** A rendition that does not exist does
+  not always answer with a clean 404, so responses are now validated as real JPEG/PNG data of a
+  plausible size before being written into a file.
+
 ## 1.0.5
 
 ### Security

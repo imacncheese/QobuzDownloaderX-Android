@@ -206,6 +206,20 @@ fun SettingsScreen(vm: AppViewModel) {
                 checked = settings.tag.writeCoverArt,
                 onChange = { vm.setTagOption("tag_cover", it) },
             )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.settings_art_size),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            ArtworkSizePicker(
+                selected = settings.artworkSize,
+                onSelect = vm::setArtworkSize,
+            )
+            Text(
+                text = stringResource(R.string.settings_art_size_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             TagSwitch("tag_album", R.string.tag_album, settings.tag.writeAlbumTitle, vm)
             TagSwitch("tag_album_artist", R.string.tag_album_artist, settings.tag.writeAlbumArtist, vm)
@@ -252,6 +266,27 @@ fun SettingsScreen(vm: AppViewModel) {
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ArtworkSizePicker(
+    selected: com.qbdlx.mobile.download.ArtworkUrls.Size,
+    onSelect: (com.qbdlx.mobile.download.ArtworkUrls.Size) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        com.qbdlx.mobile.download.ArtworkUrls.Size.entries.forEach { size ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.RadioButton(
+                    selected = selected == size,
+                    onClick = { onSelect(size) },
+                )
+                Text(
+                    text = if (size.isMaximum) "${size.label}  (recommended)" else size.label,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
     }
 }
 

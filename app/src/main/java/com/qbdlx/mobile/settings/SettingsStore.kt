@@ -3,6 +3,7 @@ package com.qbdlx.mobile.settings
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.edit
+import com.qbdlx.mobile.download.ArtworkUrls
 import com.qbdlx.mobile.download.MetadataTagger
 import com.qbdlx.mobile.download.Quality
 import com.qbdlx.mobile.download.RenameTemplates
@@ -32,6 +33,12 @@ class SettingsStore(context: Context) {
         val concurrentDownloads: Int = 2,
         val tag: MetadataTagger.Options = MetadataTagger.Options(),
         val saveLyricsFile: Boolean = false,
+        /**
+         * Artwork rendition to embed. Defaults to the largest available: the
+         * embedded cover is permanent, so starting from a small rendition loses
+         * detail that cannot be recovered later.
+         */
+        val artworkSize: ArtworkUrls.Size = ArtworkUrls.Size.MAX,
     )
 
     private val _state = MutableStateFlow(load())
@@ -48,6 +55,9 @@ class SettingsStore(context: Context) {
         customTreeUri = prefs.getString(KEY_TREE_URI, null),
         concurrentDownloads = prefs.getInt(KEY_CONCURRENCY, 2).coerceIn(1, 4),
         saveLyricsFile = prefs.getBoolean(KEY_LYRICS, false),
+        artworkSize = ArtworkUrls.Size.fromSuffix(
+            prefs.getString(KEY_ART_SIZE, ArtworkUrls.Size.MAX.suffix)
+        ),
         tag = MetadataTagger.Options(
             writeAlbumTitle = prefs.getBoolean("tag_album", true),
             writeAlbumArtist = prefs.getBoolean("tag_album_artist", true),
@@ -86,6 +96,8 @@ class SettingsStore(context: Context) {
 
     fun setCustomTreeUri(uri: Uri?) = edit { putString(KEY_TREE_URI, uri?.toString()) }
 
+    fun setArtworkSize(size: ArtworkUrls.Size) = edit { putString(KEY_ART_SIZE, size.suffix) }
+
     fun setTagOption(key: String, value: Boolean) = edit { putBoolean(key, value) }
     fun setTagCommentText(v: String) = edit { putString("tag_comment_text", v) }
 
@@ -103,5 +115,6 @@ class SettingsStore(context: Context) {
         private const val KEY_TREE_URI = "download_tree_uri"
         private const val KEY_CONCURRENCY = "concurrent_downloads"
         private const val KEY_LYRICS = "save_lyrics_file"
+        private const val KEY_ART_SIZE = "artwork_size_suffix"
     }
 }

@@ -72,6 +72,8 @@
     <string name="settings_tags">Metadata tags</string>
     <string name="settings_cover_file">Save Cover.jpg next to the tracks</string>
     <string name="settings_embed_cover">Embed cover art in each file</string>
+    <string name="settings_art_size">Embedded artwork size</string>
+    <string name="settings_art_size_hint">The embedded cover is written into the file permanently, so the largest available rendition is used by default. Lower sizes make files smaller.</string>
     <string name="settings_concurrency">Simultaneous downloads</string>
     <string name="settings_account">Account</string>
     <string name="settings_signed_in_as">Signed in as %1$s</string>

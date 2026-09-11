@@ -216,12 +216,29 @@ class TaggerAndroidTest {
         assertEquals("2026", reread.tag.getFirst(FieldKey.YEAR))
         assertEquals("1", reread.tag.getFirst(FieldKey.TRACK))
 
+        // The embedded artwork must match the source image's dimensions exactly:
+        // any downscaling here would be a permanent loss of detail in the file.
         val picture = findPictureBlock(written)
         assertNotNull("cover art must be embedded", picture)
-        assertTrue("cover art must decode", picture!!.data.isNotEmpty())
-        assertTrue(
-            "cover art must be a JPEG",
-            picture.data[0] == 0xFF.toByte() && picture.data[1] == 0xD8.toByte(),
+        val embedded = android.graphics.BitmapFactory
+            .decodeByteArray(picture!!.data, 0, picture.data.size)
+        assertNotNull("embedded cover art must decode", embedded)
+
+        val source = android.graphics.BitmapFactory
+            .decodeByteArray(jpegFixture(), 0, jpegFixture().size)
+        assertNotNull("fixture must decode", source)
+
+        assertEquals(
+            "embedded width must equal the source width",
+            source.width, embedded.width,
+        )
+        assertEquals(
+            "embedded height must equal the source height",
+            source.height, embedded.height,
+        )
+        android.util.Log.i(
+            "TaggerAndroidTest",
+            "embedded artwork ${embedded.width}x${embedded.height}, ${picture.data.size} bytes",
         )
 
         assertEquals("44100", reread.audioHeader.sampleRate)
