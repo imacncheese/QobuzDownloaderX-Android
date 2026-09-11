@@ -13,7 +13,7 @@ set -euo pipefail
 
 OWNER=""
 REPO="QobuzDownloaderX-Android"
-TAG="v1.0.6"
+TAG="v1.0.7"
 PRIVATE="false"
 
 while [ $# -gt 0 ]; do

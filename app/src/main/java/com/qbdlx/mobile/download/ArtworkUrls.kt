@@ -125,4 +125,21 @@ object ArtworkUrls {
 
     /** Local file name for a saved cover, e.g. `Cover.jpg`. */
     fun coverFile(directory: File): File = File(directory, "Cover.jpg")
+
+    /**
+     * Reorders candidates so a rendition already known to work comes first.
+     *
+     * Probing a largest-first list costs a request per missing rendition. Once one
+     * resolves, sibling tracks (same album cover) should not repeat that probing.
+     */
+    fun prioritiseKnown(
+        candidates: List<String>,
+        baseUrl: String,
+        known: Size?,
+    ): List<String> {
+        if (known == null || baseUrl.isBlank()) return candidates
+        val knownUrl = withSize(baseUrl, known)
+        if (knownUrl !in candidates) return candidates
+        return listOf(knownUrl) + candidates.filterNot { it == knownUrl }
+    }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7
+
+### Fixed
+
+- **Artwork probing was repeated per track.** Resolving the largest rendition means
+  trying candidates until one works, which for a 20-track album could mean ~200 requests for the
+  same cover. The first track now resolves the rendition and sibling tracks reuse it.
+
 ## 1.0.6
 
 ### Changed

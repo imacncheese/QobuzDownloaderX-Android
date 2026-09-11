@@ -171,4 +171,34 @@ class ArtworkUrlsTest {
         assertEquals(Size.MAX, Size.fromSuffix(null))
         assertEquals(Size.MAX, Size.fromSuffix("nonsense"))
     }
+
+    // ------------------------------------------- sibling-track cache ordering
+
+    @Test
+    fun `a known-good rendition is promoted to the front`() {
+        val candidates = ArtworkUrls.candidates(base, null, null)
+        val ordered = ArtworkUrls.prioritiseKnown(candidates, base, Size.PX_600)
+
+        assertTrue(
+            "expected the cached rendition first, got ${ordered.first()}",
+            ordered.first().endsWith("_600.jpg"),
+        )
+        assertEquals("no candidate may be lost", candidates.size, ordered.size)
+        assertEquals("no duplicates", ordered.size, ordered.distinct().size)
+    }
+
+    @Test
+    fun `prioritising with no knowledge leaves the order untouched`() {
+        val candidates = ArtworkUrls.candidates(base, null, null)
+        assertEquals(candidates, ArtworkUrls.prioritiseKnown(candidates, base, null))
+        assertEquals(candidates, ArtworkUrls.prioritiseKnown(candidates, "", Size.MAX))
+    }
+
+    @Test
+    fun `a cached rendition that is not among the candidates is ignored`() {
+        // e.g. the cover URL changed between tracks; do not invent a URL.
+        val candidates = listOf("https://x/other_max.jpg")
+        val ordered = ArtworkUrls.prioritiseKnown(candidates, base, Size.PX_600)
+        assertEquals(candidates, ordered)
+    }
 }

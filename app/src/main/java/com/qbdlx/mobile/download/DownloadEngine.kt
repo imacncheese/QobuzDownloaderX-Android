@@ -44,6 +44,17 @@ class DownloadEngine(
     private val tempDir: File
         get() = File(context.cacheDir, "qbdlx-temp").apply { if (!exists()) mkdirs() }
 
+    /**
+     * Remembers which artwork rendition actually resolved, keyed by the base
+     * artwork URL.
+     *
+     * Without this, probing a largest-first candidate list would cost up to ten
+     * requests *per track* — roughly 200 for a 20-track album, all for the same
+     * cover. The first track resolves it; the rest reuse the answer.
+     */
+    private val artworkRenditionCache =
+        java.util.concurrent.ConcurrentHashMap<String, ArtworkUrls.Size?>()
+
     /** Runs one item. Returns true when the file landed successfully. */
     suspend fun process(state: DownloadState): Boolean {
         val item = state.item
@@ -287,6 +298,8 @@ class DownloadEngine(
         item: DownloadItem,
         preferred: ArtworkUrls.Size = ArtworkUrls.Size.MAX,
     ): ByteArray? {
+        val baseKey = (item.coverUrl ?: item.album?.image?.large ?: item.album?.image?.small).orEmpty()
+
         val candidates = ArtworkUrls.candidates(
             coverUrl = item.coverUrl,
             album = item.album,
@@ -299,10 +312,16 @@ class DownloadEngine(
             return null
         }
 
-        return withContext(Dispatchers.IO) {
-            var best: ByteArray? = null
+        // A rendition already known to work for this cover is tried first.
+        val wasKnown = artworkRenditionCache.containsKey(baseKey)
+        val ordered = ArtworkUrls.prioritiseKnown(
+            candidates = candidates,
+            baseUrl = baseKey,
+            known = artworkRenditionCache[baseKey],
+        )
 
-            for (url in candidates) {
+        return withContext(Dispatchers.IO) {
+            for (url in ordered) {
                 val bytes = runCatching {
                     val req = Request.Builder().url(url)
                         .header("User-Agent", com.qbdlx.mobile.api.QobuzCredentials.USER_AGENT)
@@ -318,24 +337,23 @@ class DownloadEngine(
                     continue
                 }
 
+                // Remember which rendition worked so sibling tracks skip probing.
+                ArtworkUrls.Size.entries.firstOrNull { url.endsWith("_${it.suffix}.jpg") }
+                    ?.let { artworkRenditionCache[baseKey] = it }
+
                 val data = bytes!!
-                // The preference list already runs largest-first, so the first
-                // plausible hit is the biggest one this release offers.
-                best = data
-                Log.i(
-                    TAG,
-                    "[${item.id}] cover art ${data.size} bytes from $url",
-                )
-                break
+                Log.i(TAG, "[${item.id}] cover art ${data.size} bytes (rendition '${url.substringAfterLast('_').removeSuffix(".jpg")}') from $url")
+                return@withContext data
             }
 
-            if (best == null) {
-                Log.w(
-                    TAG,
-                    "[${item.id}] no usable cover art across ${candidates.size} candidate URLs",
-                )
-            }
-            best
+            // Nothing resolved for this cover; do not cache a failure, in case it
+            // was a transient CDN problem rather than a missing rendition.
+            if (wasKnown) artworkRenditionCache.remove(baseKey)
+            Log.w(
+                TAG,
+                "[${item.id}] no usable cover art across ${ordered.size} candidate URLs",
+            )
+            null
         }
     }
 
