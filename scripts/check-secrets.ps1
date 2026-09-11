@@ -17,6 +17,12 @@ Set-Location $root
 $files = git ls-files
 if (-not $files) { Write-Host "nothing tracked"; exit 0 }
 
+# This script necessarily contains credential *patterns*, and names the one
+# known-compromised value. Exclude it from its own scan so it cannot report a
+# false positive against itself.
+$self = "scripts/check-secrets.ps1"
+$files = $files | Where-Object { $_ -ne $self }
+
 $patterns = @{
     "GitHub classic token"   = 'ghp_[A-Za-z0-9]{20,}'
     "GitHub fine-grained"    = 'github_pat_[A-Za-z0-9_]{20,}'
@@ -25,7 +31,9 @@ $patterns = @{
     "Slack token"            = 'xox[baprs]-[A-Za-z0-9-]{10,}'
     "Qobuz app_secret literal" = 'appSecret:"[0-9a-f]{32}"'
     "Qobuz app_id literal"   = 'appId:"\d{6,}"'
-    "timezone-table secret"  = '05a4851e74ee47fda346f50cfdfc4f09'
+    # Assembled at runtime so this file does not itself contain the value it
+    # exists to detect.
+    "known-compromised value" = ('05a4851e74ee47fd' + 'a346f50cfdfc4f09')
 }
 
 $found = 0
