@@ -5,6 +5,7 @@ import com.qbdlx.mobile.api.QobuzClient
 import com.qbdlx.mobile.data.SessionStore
 import com.qbdlx.mobile.download.DownloadEngine
 import com.qbdlx.mobile.download.StorageManager
+import com.qbdlx.mobile.download.Quality
 import com.qbdlx.mobile.settings.SettingsStore
 
 /**
@@ -28,6 +29,46 @@ object AppGraph {
     @Volatile
     var downloadEngine: DownloadEngine? = null
         private set
+
+    /**
+     * Playback handle. Built lazily because it connects to a media session
+     * service, which should not be started just because the app launched.
+     */
+    @Volatile
+    private var playerRef: com.qbdlx.mobile.playback.PlayerController? = null
+
+    fun player(context: Context): com.qbdlx.mobile.playback.PlayerController {
+        playerRef?.let { return it }
+        synchronized(this) {
+            playerRef?.let { return it }
+            val created = com.qbdlx.mobile.playback.PlayerController(
+                context = context.applicationContext,
+                resolveStreamUrl = { trackId -> resolveStreamUrl(trackId) },
+            )
+            playerRef = created
+            return created
+        }
+    }
+
+    /**
+     * Resolves a signed stream URL for playback.
+     *
+     * Mirrors the download path's quality fallback: Qobuz refuses formats a
+     * release is not licensed for, and playback should degrade rather than fail.
+     */
+    private suspend fun resolveStreamUrl(trackId: String): String {
+        val requested = Quality.fromId(settings.current.quality.formatId)
+        var lastError: Throwable? = null
+        for (quality in Quality.fallbackChain(requested)) {
+            try {
+                val url = client.getFileUrl(trackId, quality.formatId).url
+                if (!url.isNullOrBlank()) return url
+            } catch (e: Throwable) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException("No stream URL available for track $trackId")
+    }
 
     fun init(context: Context) {
         if (initialised) return

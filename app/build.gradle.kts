@@ -13,8 +13,8 @@ android {
         applicationId = "com.qbdlx.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.1.0"
+        versionCode = 10
+        versionName = "1.2.0"
         vectorDrawables { useSupportLibrary = true }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -123,6 +123,9 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.palette)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.ui)
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)

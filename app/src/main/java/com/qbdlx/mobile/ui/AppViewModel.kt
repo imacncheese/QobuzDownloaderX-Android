@@ -7,6 +7,8 @@ import com.qbdlx.mobile.api.Album
 import com.qbdlx.mobile.api.AlbumPage
 import com.qbdlx.mobile.api.Artist
 import com.qbdlx.mobile.api.ArtistPage
+import com.qbdlx.mobile.api.Playlist
+import com.qbdlx.mobile.api.PlaylistPage
 import com.qbdlx.mobile.api.QobuzApiException
 import com.qbdlx.mobile.api.QobuzClient
 import com.qbdlx.mobile.api.Track
@@ -18,6 +20,8 @@ import com.qbdlx.mobile.download.DownloadQueue
 import com.qbdlx.mobile.download.DownloadService
 import com.qbdlx.mobile.download.DownloadState
 import com.qbdlx.mobile.download.Quality
+import com.qbdlx.mobile.playback.PlaybackState
+import com.qbdlx.mobile.playback.QueueItem
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -104,7 +108,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ----------------------------------------------------------- search state
 
-    enum class SearchTab { ALBUMS, TRACKS, ARTISTS }
+    enum class SearchTab { ALBUMS, TRACKS, ARTISTS, PLAYLISTS }
 
     data class SearchUi(
         val query: String = "",
@@ -113,6 +117,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val albums: List<Album> = emptyList(),
         val tracks: List<Track> = emptyList(),
         val artists: List<Artist> = emptyList(),
+        val playlists: List<Playlist> = emptyList(),
         val error: String? = null,
         val hasSearched: Boolean = false,
     )
@@ -126,7 +131,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _search.update { it.copy(query = v) }
         searchJob?.cancel()
         if (v.isBlank()) {
-            _search.update { it.copy(albums = emptyList(), tracks = emptyList(), artists = emptyList(), hasSearched = false, error = null) }
+            _search.update {
+                it.copy(
+                    albums = emptyList(),
+                    tracks = emptyList(),
+                    artists = emptyList(),
+                    playlists = emptyList(),
+                    hasSearched = false,
+                    error = null,
+                )
+            }
             return
         }
         searchJob = viewModelScope.launch {
@@ -168,6 +182,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     val page: ArtistPage = client.searchArtists(query)
                     _search.update { it.copy(artists = page.items, loading = false, hasSearched = true) }
                 }
+                SearchTab.PLAYLISTS -> {
+                    val page: PlaylistPage = client.searchPlaylists(query)
+                    _search.update { it.copy(playlists = page.items, loading = false, hasSearched = true) }
+                }
             }
         } catch (e: Throwable) {
             _search.update { it.copy(loading = false, error = friendly(e), hasSearched = true) }
@@ -192,8 +210,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val full = client.getFullAlbum(albumId)
+                val tracks = full.tracks?.items.orEmpty().size
+                android.util.Log.i(
+                    "QbdlxAlbum",
+                    "openAlbum id=$albumId title='${full.title}' tracks=$tracks",
+                )
                 _album.value = AlbumUi(albumId = albumId, loading = false, album = full)
             } catch (e: Throwable) {
+                android.util.Log.w("QbdlxAlbum", "openAlbum id=$albumId failed", e)
                 _album.value = AlbumUi(albumId = albumId, loading = false, error = friendly(e))
             }
         }
@@ -320,6 +344,54 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearFinishedDownloads() = DownloadQueue.clearFinished()
+
+    // ------------------------------------------------------------- playback
+
+    private val playerController by lazy { AppGraph.player(app) }
+
+    val playback: StateFlow<PlaybackState> get() = playerController.state
+
+    /** Connects to the playback service. Call once from the UI. */
+    fun connectPlayer() = playerController.connect()
+
+    fun releasePlayer() = playerController.release()
+
+    /**
+     * Plays [tracks] starting at [startIndex].
+     *
+     * The whole list becomes the queue so next/previous work, matching what the
+     * user sees on screen rather than playing a single detached track.
+     */
+    fun playTracks(tracks: List<Track>, startIndex: Int, album: Album? = null) {
+        val usable = tracks.filter { !it.idString.isNullOrBlank() }
+        if (usable.isEmpty()) return
+        val start = usable.indexOfFirst { it.idString == tracks.getOrNull(startIndex)?.idString }
+            .takeIf { it >= 0 } ?: 0
+
+        val items = usable.map { t -> t.toQueueItem(t.album ?: album) }
+        playerController.play(items, start)
+    }
+
+    fun togglePlayPause() = playerController.togglePlayPause()
+    fun nextTrack() = playerController.next()
+    fun previousTrack() = playerController.previous()
+    fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
+    fun seekToQueueIndex(index: Int) = playerController.seekToIndex(index)
+    fun stopPlayback() = playerController.stop()
+    fun clearPlaybackError() = playerController.clearError()
+
+    private fun Track.toQueueItem(album: Album?): QueueItem {
+        val resolvedAlbum = album ?: this.album
+        return QueueItem(
+            trackId = idString.orEmpty(),
+            title = title ?: "Untitled",
+            artist = artist?.name ?: performer?.name ?: resolvedAlbum?.artist?.name ?: "Unknown artist",
+            albumTitle = resolvedAlbum?.title.orEmpty(),
+            artworkUrl = image?.large ?: resolvedAlbum?.image?.large ?: resolvedAlbum?.image?.small,
+            durationSeconds = duration ?: 0,
+            track = this,
+        )
+    }
 
     // ------------------------------------------------------------- preference
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- **Embedded player with background playback.** Tapping a track starts it; the whole album becomes the
+  queue so next/previous work. Playback runs in a Media3 `MediaSessionService`, so audio continues
+  when the app is backgrounded or the screen is locked, with lock-screen and notification controls.
+  Includes a mini player above the navigation bar and a full now-playing screen with seek.
+- **Playlist search.** A fourth search tab returns playlists with cover, owner and track count.
+
+### Changed
+
+- Track rows in an album now play on tap instead of doing nothing; the playing row is highlighted and
+  its number is replaced by a play/pause indicator.
+
+### Diagnostics
+
+- `album/get` now logs the album title, the `tracks_count` field, and the actual track-page size. The
+  previous behaviour was an empty album screen with no explanation; that path is now observable in
+  logcat under `QbdlxApi` and `QbdlxAlbum`.
+
+### Known gaps
+
+- Playlist detail is not implemented: playlist covers are tappable targets but no detail screen exists yet.
+- Streaming quality follows the download-quality setting rather than a separate playback preference.
+
 ## 1.1.0
 
 ### Added

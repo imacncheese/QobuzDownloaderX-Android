@@ -33,19 +33,51 @@ fun CoverArt(
     size: Dp,
     fallback: ImageVector = Icons.Filled.Album,
     shape: RoundedCornerShape = LocalShapes.current.artworkSmall,
+    modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(shape),
-        contentAlignment = Alignment.Center,
-    ) {
+    Artwork(
+        url = url,
+        fallback = fallback,
+        iconSize = size / 2,
+        modifier = modifier.size(size).clip(shape),
+    )
+}
+
+/**
+ * Artwork that fills whatever space the caller gives it.
+ *
+ * Used by the full player, where the cover scales with the screen rather than
+ * being a fixed size.
+ */
+@Composable
+fun FilledCoverArt(
+    url: String?,
+    fallback: ImageVector = Icons.Filled.Album,
+    shape: RoundedCornerShape = LocalShapes.current.artworkLarge,
+    modifier: Modifier = Modifier,
+) {
+    Artwork(
+        url = url,
+        fallback = fallback,
+        iconSize = 72.dp,
+        modifier = modifier.clip(shape),
+    )
+}
+
+@Composable
+private fun Artwork(
+    url: String?,
+    fallback: ImageVector,
+    iconSize: Dp,
+    modifier: Modifier,
+) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (url.isNullOrBlank()) {
             Icon(
                 imageVector = fallback,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(size / 2),
+                modifier = Modifier.size(iconSize),
             )
         } else {
             AsyncImage(
@@ -61,10 +93,7 @@ fun CoverArt(
     }
 }
 
-/**
- * Larger artwork for detail screens, with a soft shadow so it lifts off the
- * blurred header behind it.
- */
+/** Larger artwork for detail screens. */
 @Composable
 fun AlbumArtwork(
     url: String?,

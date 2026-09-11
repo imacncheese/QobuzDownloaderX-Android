@@ -1,6 +1,7 @@
 package com.qbdlx.mobile.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -40,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -106,6 +110,7 @@ private fun AlbumContent(album: com.qbdlx.mobile.api.Album, vm: AppViewModel) {
     val tracks = album.tracks?.items.orEmpty()
     val albumDownload by vm.albumDownload.collectAsStateWithLifecycle()
     val busy = albumDownload.loading && albumDownload.albumId == album.idString
+    val playback by vm.playback.collectAsStateWithLifecycle()
 
     LazyColumn(
         contentPadding = PaddingValues(bottom = 32.dp),
@@ -122,7 +127,15 @@ private fun AlbumContent(album: com.qbdlx.mobile.api.Album, vm: AppViewModel) {
             )
         }
         items(tracks, key = { it.idString ?: it.hashCode().toString() }) { track ->
-            AlbumTrackRow(track) { vm.downloadTrack(track) }
+            val index = tracks.indexOf(track)
+            val isCurrent = playback.current?.trackId == track.idString
+            AlbumTrackRow(
+                track = track,
+                isCurrent = isCurrent,
+                isPlaying = isCurrent && playback.isPlaying,
+                onPlay = { vm.playTracks(tracks, index, album) },
+                onDownload = { vm.downloadTrack(track) },
+            )
         }
     }
 }
@@ -295,25 +308,51 @@ private fun AlbumHeader(
 }
 
 @Composable
-private fun AlbumTrackRow(track: Track, onDownload: () -> Unit) {
+private fun AlbumTrackRow(
+    track: Track,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    onPlay: () -> Unit,
+    onDownload: () -> Unit,
+) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        color = if (isCurrent) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onPlay),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = (track.track_number ?: 0).toString().padStart(2, '0'),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(30.dp),
-            )
+            // The number doubles as the now-playing indicator, so the row does
+            // not need to grow when a track starts.
+            Box(Modifier.width(34.dp), contentAlignment = Alignment.Center) {
+                if (isCurrent) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                } else {
+                    Text(
+                        text = (track.track_number ?: 0).toString().padStart(2, '0'),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     text = track.title ?: "Untitled",
                     style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primary else Color.Unspecified,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

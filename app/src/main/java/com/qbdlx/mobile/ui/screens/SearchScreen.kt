@@ -17,9 +17,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +54,7 @@ import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.artworkUrl
 import com.qbdlx.mobile.ui.components.CoverArt
 import com.qbdlx.mobile.ui.formatDuration
+import com.qbdlx.mobile.ui.theme.LocalShapes
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,6 +62,7 @@ import kotlinx.coroutines.delay
 fun SearchScreen(
     vm: AppViewModel,
     onOpenAlbum: (String) -> Unit,
+    onOpenPlaylist: (String) -> Unit = {},
 ) {
     val state by vm.search.collectAsStateWithLifecycle()
     val albumDownload by vm.albumDownload.collectAsStateWithLifecycle()
@@ -97,6 +101,11 @@ fun SearchScreen(
                 onClick = { vm.onTab(AppViewModel.SearchTab.ARTISTS) },
                 label = { Text(stringResource(R.string.search_tab_artists)) },
             )
+            FilterChip(
+                selected = state.tab == AppViewModel.SearchTab.PLAYLISTS,
+                onClick = { vm.onTab(AppViewModel.SearchTab.PLAYLISTS) },
+                label = { Text(stringResource(R.string.search_tab_playlists)) },
+            )
         }
 
         when {
@@ -119,6 +128,7 @@ fun SearchScreen(
                     AppViewModel.SearchTab.ALBUMS -> state.albums.isEmpty()
                     AppViewModel.SearchTab.TRACKS -> state.tracks.isEmpty()
                     AppViewModel.SearchTab.ARTISTS -> state.artists.isEmpty()
+                    AppViewModel.SearchTab.PLAYLISTS -> state.playlists.isEmpty()
                 }
                 if (empty) {
                     EmptyPane(
@@ -145,6 +155,12 @@ fun SearchScreen(
                             }
                             AppViewModel.SearchTab.ARTISTS -> items(state.artists, key = { it.idString ?: it.hashCode().toString() }) { artist ->
                                 ArtistRow(artist)
+                            }
+                            AppViewModel.SearchTab.PLAYLISTS -> items(state.playlists, key = { it.idString ?: it.hashCode().toString() }) { playlist ->
+                                PlaylistRow(
+                                    playlist = playlist,
+                                    onOpen = { playlist.idString?.let(onOpenPlaylist) },
+                                )
                             }
                         }
                     }
@@ -295,6 +311,51 @@ private fun ArtistRow(artist: Artist) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PlaylistRow(
+    playlist: com.qbdlx.mobile.api.Playlist,
+    onOpen: () -> Unit,
+) {
+    val cover = playlist.images.firstOrNull()
+        ?: playlist.image_rectangle.firstOrNull()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(LocalShapes.current.card)
+            .clickable(onClick = onOpen)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CoverArt(artworkUrl(cover), 56.dp, fallback = Icons.Filled.QueueMusic)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = playlist.name ?: "Untitled playlist",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = listOfNotNull(
+                    playlist.owner?.name,
+                    playlist.tracks_count?.let { "$it tracks" },
+                ).joinToString(" • "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

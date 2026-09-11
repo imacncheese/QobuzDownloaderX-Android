@@ -17,6 +17,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -29,6 +30,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +50,8 @@ import com.qbdlx.mobile.ui.screens.LoginScreen
 import com.qbdlx.mobile.ui.screens.SearchScreen
 import com.qbdlx.mobile.ui.screens.SettingsScreen
 import com.qbdlx.mobile.settings.SettingsStore
+import com.qbdlx.mobile.ui.components.FullPlayer
+import com.qbdlx.mobile.ui.components.MiniPlayerBar
 import com.qbdlx.mobile.ui.theme.QobuzDlxTheme
 import com.qbdlx.mobile.ui.theme.rememberArtworkAccent
 
@@ -117,9 +121,29 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
 
         var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
         var openAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
+        var playerExpanded by rememberSaveable { mutableStateOf(false) }
+
+        val playback by vm.playback.collectAsStateWithLifecycle()
+
+        // The media session service is only started when something can play, so
+        // launching the app without signing in does not spin up a service.
+        LaunchedEffect(session) { vm.connectPlayer() }
+        DisposableEffect(Unit) { onDispose { vm.releasePlayer() } }
 
         // Reset the detail view when the user switches tabs.
         LaunchedEffect(tab) { openAlbumId = null }
+
+        if (playerExpanded && playback.hasItem) {
+            FullPlayer(
+                state = playback,
+                onTogglePlay = vm::togglePlayPause,
+                onNext = vm::nextTrack,
+                onPrevious = vm::previousTrack,
+                onSeek = vm::seekTo,
+                onCollapse = { playerExpanded = false },
+            )
+            return@QobuzDlxTheme
+        }
 
         val albumId = openAlbumId
         AnimatedContent(
@@ -138,21 +162,37 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
             } else {
                 Scaffold(
                     bottomBar = {
-                        NavigationBar {
-                            Tab.entries.forEach { t ->
-                                NavigationBarItem(
-                                    selected = tab == t,
-                                    onClick = { tab = t },
-                                    icon = { Icon(t.icon, contentDescription = null) },
-                                    label = { Text(stringResource(t.labelRes)) },
-                                )
+                        Column {
+                            // Mini player rides above the navigation bar so it is
+                            // reachable from every tab.
+                            MiniPlayerBar(
+                                state = playback,
+                                onTogglePlay = vm::togglePlayPause,
+                                onNext = vm::nextTrack,
+                                onPrevious = vm::previousTrack,
+                                onStop = vm::stopPlayback,
+                                onExpand = { playerExpanded = true },
+                            )
+                            NavigationBar {
+                                Tab.entries.forEach { t ->
+                                    NavigationBarItem(
+                                        selected = tab == t,
+                                        onClick = { tab = t },
+                                        icon = { Icon(t.icon, contentDescription = null) },
+                                        label = { Text(stringResource(t.labelRes)) },
+                                    )
+                                }
                             }
                         }
                     },
                 ) { padding ->
                     Box(Modifier.fillMaxSize().padding(padding)) {
                         when (tab) {
-                            Tab.SEARCH -> SearchScreen(vm, onOpenAlbum = { openAlbumId = it })
+                            Tab.SEARCH -> SearchScreen(
+                                vm = vm,
+                                onOpenAlbum = { openAlbumId = it },
+                                onOpenPlaylist = { /* playlist detail is not implemented yet */ },
+                            )
                             Tab.DOWNLOADS -> DownloadsScreen(vm)
                             Tab.SETTINGS -> SettingsScreen(vm)
                         }

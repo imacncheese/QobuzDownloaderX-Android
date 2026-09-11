@@ -2,6 +2,7 @@ package com.qbdlx.mobile.api
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.util.Log
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -198,7 +199,21 @@ class QobuzClient(
     /** Fetches every track of an album, following the pagination loop from the C# GetInfo class. */
     suspend fun getFullAlbum(albumId: String): Album = withContext(Dispatchers.IO) {
         val first = getAlbum(albumId)
-        val page = first.tracks ?: return@withContext first
+        val page = first.tracks
+
+        Log.i(
+            TAG,
+            "album/get id=$albumId -> title='${first.title}' tracksCountField=${first.tracks_count} " +
+                "tracksPage=${if (page == null) "null" else "items=${page.items.size} total=${page.total}"}",
+        )
+
+        if (page == null) {
+            // The album loaded but carried no track page at all. Surfacing this in
+            // logcat is the difference between "the screen is empty" and knowing why.
+            Log.w(TAG, "album/get returned no tracks object for id=$albumId")
+            return@withContext first
+        }
+
         val total = page.total ?: page.items.size
         if (page.items.size >= total) return@withContext first
 
@@ -219,6 +234,7 @@ class QobuzClient(
             all += items
             offset += items.size
         }
+        Log.i(TAG, "album/get id=$albumId collected ${all.size} of $total tracks")
         first.copy(tracks = page.copy(items = all))
     }
 
@@ -526,6 +542,7 @@ class QobuzClient(
     companion object {
         const val BASE_URL = "https://www.qobuz.com/api.json/0.2/"
         private const val MAX_OFFSET = 100_000
+        private const val TAG = "QbdlxApi"
 
         fun md5Hex(input: String): String {
             val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
