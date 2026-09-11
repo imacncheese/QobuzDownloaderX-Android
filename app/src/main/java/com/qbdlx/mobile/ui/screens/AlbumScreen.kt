@@ -1,5 +1,6 @@
 package com.qbdlx.mobile.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,20 +37,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.compose.AsyncImage
 import com.qbdlx.mobile.R
 import com.qbdlx.mobile.api.Track
 import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.artworkUrl
+import com.qbdlx.mobile.ui.components.AlbumArtwork
 import com.qbdlx.mobile.ui.formatBitDepthRate
 import com.qbdlx.mobile.ui.formatDuration
+import com.qbdlx.mobile.ui.theme.LocalShapes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -128,123 +136,161 @@ private fun AlbumHeader(
     onDownloadAll: () -> Unit,
     onDismissError: () -> Unit,
 ) {
-    Column(modifier = Modifier.padding(16.dp)) {
-        Row {
-            Box(
+    val art = artworkUrl(album.image?.large ?: album.image?.small, 600)
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Blurred cover art sits behind the header, giving the screen the album's
+        // colour rather than a flat panel. Scaled slightly so the blur's soft
+        // edges do not reveal the bounds.
+        if (!art.isNullOrBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(art)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(132.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                val art = artworkUrl(album.image?.large ?: album.image?.small, 600)
-                if (art.isNullOrBlank()) {
-                    Icon(
-                        Icons.Filled.Album,
-                        contentDescription = null,
-                        modifier = Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    AsyncImage(
-                        model = art,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    text = album.title ?: "Untitled",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                album.version?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = listOfNotNull(
-                        album.artist?.name,
-                        album.release_date_original?.take(4),
-                        if (trackCount > 0) stringResource(R.string.tracks_count, trackCount) else null,
-                    ).joinToString(" • "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                formatBitDepthRate(album.maximum_bit_depth, album.maximum_sampling_rate)?.let { spec ->
-                    Spacer(Modifier.height(6.dp))
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(spec) },
-                        leadingIcon = {
-                            Icon(Icons.Filled.HighQuality, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                    )
-                }
-                album.label?.name?.let {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Button(
-            onClick = onDownloadAll,
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.loading_tracks))
-            } else {
-                Icon(Icons.Filled.Download, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.download_album))
-            }
-        }
-
-        if (trackCount == 0 && !busy) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.album_no_tracks),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    .matchParentSize()
+                    .blur(36.dp),
             )
         }
 
-        error?.let {
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.weight(1f),
+        // Gradient scrim so the text stays readable over any cover, however bright.
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.55f),
+                            MaterialTheme.colorScheme.background.copy(alpha = 0.88f),
+                            MaterialTheme.colorScheme.background,
+                        ),
+                    )
+                ),
+        )
+
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp)) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                AlbumArtwork(
+                    url = art,
+                    size = 148.dp,
+                    shape = LocalShapes.current.artworkLarge,
+                    prominent = true,
                 )
-                TextButton(onClick = onDismissError) {
-                    Text(stringResource(R.string.ok))
+                Spacer(Modifier.width(18.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = album.title ?: "Untitled",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    album.version?.let {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = listOfNotNull(
+                            album.artist?.name,
+                            album.release_date_original?.take(4),
+                            if (trackCount > 0) stringResource(R.string.tracks_count, trackCount) else null,
+                        ).joinToString(" • "),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    formatBitDepthRate(album.maximum_bit_depth, album.maximum_sampling_rate)?.let { spec ->
+                        Spacer(Modifier.height(8.dp))
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(spec) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.HighQuality,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
+                    }
                 }
             }
+
+            album.label?.name?.let {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            album.copyright?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = onDownloadAll,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = LocalShapes.current.field,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.loading_tracks))
+                } else {
+                    Icon(Icons.Filled.Download, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.download_album))
+                }
+            }
+
+            if (trackCount == 0 && !busy) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.album_no_tracks),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            error?.let { message ->
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onDismissError) {
+                        Text(stringResource(R.string.ok))
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 

@@ -50,6 +50,7 @@ import com.qbdlx.mobile.api.Artist
 import com.qbdlx.mobile.api.Track
 import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.artworkUrl
+import com.qbdlx.mobile.ui.components.CoverArt
 import com.qbdlx.mobile.ui.formatDuration
 import kotlinx.coroutines.delay
 
@@ -293,36 +294,6 @@ private fun ArtistRow(artist: Artist) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-    }
-}
-
-@Composable
-fun CoverArt(
-    url: String?,
-    size: androidx.compose.ui.unit.Dp,
-    fallback: androidx.compose.ui.graphics.vector.ImageVector = Icons.Filled.Album,
-) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(RoundedCornerShape(8.dp)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (url.isNullOrBlank()) {
-            Icon(
-                imageVector = fallback,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(size / 2),
-            )
-        } else {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
         }
     }
 }

@@ -9,6 +9,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -34,12 +41,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qbdlx.mobile.ui.AppViewModel
+import com.qbdlx.mobile.ui.artworkUrl
 import com.qbdlx.mobile.ui.screens.AlbumScreen
 import com.qbdlx.mobile.ui.screens.DownloadsScreen
 import com.qbdlx.mobile.ui.screens.LoginScreen
 import com.qbdlx.mobile.ui.screens.SearchScreen
 import com.qbdlx.mobile.ui.screens.SettingsScreen
+import com.qbdlx.mobile.settings.SettingsStore
 import com.qbdlx.mobile.ui.theme.QobuzDlxTheme
+import com.qbdlx.mobile.ui.theme.rememberArtworkAccent
 
 class MainActivity : ComponentActivity() {
 
@@ -55,9 +65,11 @@ class MainActivity : ComponentActivity() {
         askForNotificationPermission()
 
         setContent {
-            QobuzDlxTheme {
-                AppRoot(vm)
-            }
+            // The theme wraps the whole tree, including the login screen, so the
+            // chosen preset applies everywhere rather than only after sign-in.
+            val settings by vm.settingsState.collectAsStateWithLifecycle()
+
+            AppRoot(vm, settings)
         }
     }
 
@@ -77,45 +89,75 @@ private enum class Tab(val labelRes: Int, val icon: ImageVector) {
 }
 
 @Composable
-private fun AppRoot(vm: AppViewModel) {
+private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
     val session by vm.signedIn.collectAsStateWithLifecycle()
 
-    if (session == null) {
-        LoginScreen(vm)
-        return
-    }
+    // Artwork-derived accent, resolved once for the currently open album and fed
+    // into the theme so the whole UI picks up the cover's colour.
+    val albumState by vm.album.collectAsStateWithLifecycle()
+    val coverUrl = artworkUrl(
+        albumState.album?.image?.large ?: albumState.album?.image?.small,
+        size = 300,
+    )
+    val accent by rememberArtworkAccent(
+        artworkUrl = coverUrl,
+        enabled = settings.tintFromArtwork,
+    )
 
-    var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
-    var openAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
+    QobuzDlxTheme(
+        preset = settings.themePreset,
+        mode = settings.themeMode,
+        cornerScale = settings.cornerScale,
+        accentOverride = accent,
+    ) {
+        if (session == null) {
+            LoginScreen(vm)
+            return@QobuzDlxTheme
+        }
 
-    // Reset the detail view when the user switches tabs.
-    LaunchedEffect(tab) { openAlbumId = null }
+        var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
+        var openAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val albumId = openAlbumId
-    if (albumId != null) {
-        AlbumScreen(vm, onBack = { openAlbumId = null })
-        return
-    }
+        // Reset the detail view when the user switches tabs.
+        LaunchedEffect(tab) { openAlbumId = null }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { t ->
-                    NavigationBarItem(
-                        selected = tab == t,
-                        onClick = { tab = t },
-                        icon = { Icon(t.icon, contentDescription = null) },
-                        label = { Text(stringResource(t.labelRes)) },
-                    )
+        val albumId = openAlbumId
+        AnimatedContent(
+            targetState = albumId,
+            transitionSpec = {
+                // Slide the detail view in over the list, and back out on close.
+                val forward = targetState != null
+                val offset = if (forward) { full: Int -> full / 6 } else { full: Int -> -full / 6 }
+                (slideInHorizontally(animationSpec = tween(280)) { offset(it) } + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(animationSpec = tween(280)) { -offset(it) } + fadeOut(tween(160)))
+            },
+            label = "album",
+        ) { detailId ->
+            if (detailId != null) {
+                AlbumScreen(vm, onBack = { openAlbumId = null })
+            } else {
+                Scaffold(
+                    bottomBar = {
+                        NavigationBar {
+                            Tab.entries.forEach { t ->
+                                NavigationBarItem(
+                                    selected = tab == t,
+                                    onClick = { tab = t },
+                                    icon = { Icon(t.icon, contentDescription = null) },
+                                    label = { Text(stringResource(t.labelRes)) },
+                                )
+                            }
+                        }
+                    },
+                ) { padding ->
+                    Box(Modifier.fillMaxSize().padding(padding)) {
+                        when (tab) {
+                            Tab.SEARCH -> SearchScreen(vm, onOpenAlbum = { openAlbumId = it })
+                            Tab.DOWNLOADS -> DownloadsScreen(vm)
+                            Tab.SETTINGS -> SettingsScreen(vm)
+                        }
+                    }
                 }
-            }
-        },
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            when (tab) {
-                Tab.SEARCH -> SearchScreen(vm, onOpenAlbum = { openAlbumId = it })
-                Tab.DOWNLOADS -> DownloadsScreen(vm)
-                Tab.SETTINGS -> SettingsScreen(vm)
             }
         }
     }

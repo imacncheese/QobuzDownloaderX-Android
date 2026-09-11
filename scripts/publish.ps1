@@ -13,7 +13,7 @@
 param(
     [string]$Owner = "",
     [string]$Repo = "QobuzDownloaderX-Android",
-    [string]$Tag = "v1.0.7",
+    [string]$Tag = "v1.1.0",
     [switch]$Private
 )
 

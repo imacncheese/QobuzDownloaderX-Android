@@ -332,6 +332,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setSaveCover(v: Boolean) = settings.setSaveCoverToFolder(v)
     fun setConcurrency(v: Int) = settings.setConcurrency(v)
     fun setArtworkSize(size: ArtworkUrls.Size) = settings.setArtworkSize(size)
+
+    // ------------------------------------------------------------------ theme
+    fun setThemePreset(preset: com.qbdlx.mobile.ui.theme.ThemePreset) =
+        settings.setThemePreset(preset)
+
+    fun setThemeMode(mode: com.qbdlx.mobile.ui.theme.ThemeMode) = settings.setThemeMode(mode)
+    fun setCornerScale(scale: Float) = settings.setCornerScale(scale)
+    fun setTintFromArtwork(enabled: Boolean) = settings.setTintFromArtwork(enabled)
     fun setCustomTreeUri(uri: android.net.Uri?) = settings.setCustomTreeUri(uri)
     fun setTagOption(key: String, value: Boolean) = settings.setTagOption(key, value)
 

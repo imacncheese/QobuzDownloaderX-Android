@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- **Themes.** Four presets — Qobuz (purple/cyan), AMOLED Black, Midnight and Daylight — plus
+  *Match wallpaper* on Android 12+. Each preset derives a complete Material 3 role set, so light and
+  dark stay in step rather than being hand-listed per mode.
+- **Light / dark / follow-system toggle**, independent of the preset.
+- **Corner rounding slider**, from square to pill. Applies to cover art, cards, fields and Material
+  role shapes through a single setting rather than per-screen radii.
+- **Tint the app from cover art.** Opening an album can drive the accent colour from its artwork via
+  AndroidX Palette, which picks a vibrant swatch instead of averaging pixels to grey.
+- **Redesigned album screen**: blurred artwork behind the header, a larger cover, release metadata and
+  a gradient scrim so text stays readable over any cover.
+- **Animated transitions** between the list and album detail views.
+
+### Changed
+
+- **Dynamic colour is no longer forced on.** It previously overrode the brand palette on Android 12+,
+  which is why the app looked unstyled on modern devices. It is now an explicit choice.
+- Accent colours are checked against WCAG relative luminance and lifted only when they fall below a
+  4.5:1 contrast target, so passing colours (including the brand purple) are left untouched.
+
 ## 1.0.7
 
 ### Fixed

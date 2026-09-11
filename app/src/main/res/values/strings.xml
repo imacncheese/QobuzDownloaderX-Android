@@ -76,6 +76,13 @@
     <string name="settings_art_size_hint">The embedded cover is written into the file permanently, so the largest available rendition is used by default. Lower sizes make files smaller.</string>
     <string name="settings_concurrency">Simultaneous downloads</string>
     <string name="settings_account">Account</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_mode">Light or dark</string>
+    <string name="settings_corner_radius">Corner rounding</string>
+    <string name="settings_tint_from_artwork">Tint the app from cover art</string>
+    <string name="settings_tint_from_artwork_hint">Uses the dominant colour of the album you open, so the interface picks up its palette.</string>
+    <string name="settings_dynamic_unavailable">Wallpaper colours need Android 12 or newer and are unavailable on this device.</string>
     <string name="settings_signed_in_as">Signed in as %1$s</string>
     <string name="settings_subscription">Plan: %1$s</string>
     <string name="settings_about">About</string>

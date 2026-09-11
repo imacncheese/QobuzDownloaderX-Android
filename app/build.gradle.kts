@@ -13,8 +13,8 @@ android {
         applicationId = "com.qbdlx.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.0.7"
+        versionCode = 9
+        versionName = "1.1.0"
         vectorDrawables { useSupportLibrary = true }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -122,6 +122,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.palette)
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)

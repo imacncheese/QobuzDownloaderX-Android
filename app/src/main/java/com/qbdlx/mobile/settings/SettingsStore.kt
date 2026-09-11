@@ -7,6 +7,9 @@ import com.qbdlx.mobile.download.ArtworkUrls
 import com.qbdlx.mobile.download.MetadataTagger
 import com.qbdlx.mobile.download.Quality
 import com.qbdlx.mobile.download.RenameTemplates
+import com.qbdlx.mobile.ui.theme.AppShapes
+import com.qbdlx.mobile.ui.theme.ThemeMode
+import com.qbdlx.mobile.ui.theme.ThemePreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,6 +42,14 @@ class SettingsStore(context: Context) {
          * detail that cannot be recovered later.
          */
         val artworkSize: ArtworkUrls.Size = ArtworkUrls.Size.MAX,
+
+        // ------------------------------------------------------------- theme
+        val themePreset: ThemePreset = ThemePreset.QOBUZ,
+        val themeMode: ThemeMode = ThemeMode.SYSTEM,
+        /** Global corner rounding, 0 (square) to 2 (pill). */
+        val cornerScale: Float = AppShapes.DEFAULT_SCALE,
+        /** Tint the UI from the currently open album's cover art. */
+        val tintFromArtwork: Boolean = false,
     )
 
     private val _state = MutableStateFlow(load())
@@ -58,6 +69,12 @@ class SettingsStore(context: Context) {
         artworkSize = ArtworkUrls.Size.fromSuffix(
             prefs.getString(KEY_ART_SIZE, ArtworkUrls.Size.MAX.suffix)
         ),
+        themePreset = ThemePreset.fromId(prefs.getString(KEY_THEME_PRESET, null)),
+        themeMode = ThemeMode.fromId(prefs.getString(KEY_THEME_MODE, null)),
+        cornerScale = AppShapes.clamp(
+            prefs.getFloat(KEY_CORNER_SCALE, AppShapes.DEFAULT_SCALE)
+        ),
+        tintFromArtwork = prefs.getBoolean(KEY_TINT_FROM_ART, false),
         tag = MetadataTagger.Options(
             writeAlbumTitle = prefs.getBoolean("tag_album", true),
             writeAlbumArtist = prefs.getBoolean("tag_album_artist", true),
@@ -98,6 +115,12 @@ class SettingsStore(context: Context) {
 
     fun setArtworkSize(size: ArtworkUrls.Size) = edit { putString(KEY_ART_SIZE, size.suffix) }
 
+    // ------------------------------------------------------------------ theme
+    fun setThemePreset(preset: ThemePreset) = edit { putString(KEY_THEME_PRESET, preset.id) }
+    fun setThemeMode(mode: ThemeMode) = edit { putString(KEY_THEME_MODE, mode.id) }
+    fun setCornerScale(scale: Float) = edit { putFloat(KEY_CORNER_SCALE, AppShapes.clamp(scale)) }
+    fun setTintFromArtwork(enabled: Boolean) = edit { putBoolean(KEY_TINT_FROM_ART, enabled) }
+
     fun setTagOption(key: String, value: Boolean) = edit { putBoolean(key, value) }
     fun setTagCommentText(v: String) = edit { putString("tag_comment_text", v) }
 
@@ -116,5 +139,9 @@ class SettingsStore(context: Context) {
         private const val KEY_CONCURRENCY = "concurrent_downloads"
         private const val KEY_LYRICS = "save_lyrics_file"
         private const val KEY_ART_SIZE = "artwork_size_suffix"
+        private const val KEY_THEME_PRESET = "theme_preset"
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_CORNER_SCALE = "theme_corner_scale"
+        private const val KEY_TINT_FROM_ART = "theme_tint_from_artwork"
     }
 }

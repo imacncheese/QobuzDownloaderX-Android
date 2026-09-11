@@ -2,7 +2,10 @@ package com.qbdlx.mobile.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,8 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -23,6 +28,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +53,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qbdlx.mobile.R
 import com.qbdlx.mobile.download.Quality
 import com.qbdlx.mobile.ui.AppViewModel
+import com.qbdlx.mobile.ui.theme.AppShapes
+import com.qbdlx.mobile.ui.theme.ThemeMode
+import com.qbdlx.mobile.ui.theme.ThemePalette
+import com.qbdlx.mobile.ui.theme.ThemePreset
 
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
@@ -194,6 +208,103 @@ fun SettingsScreen(vm: AppViewModel) {
             )
         }
 
+        // ---------------------------------------------------------- appearance
+        SectionCard(title = stringResource(R.string.settings_appearance)) {
+            Text(
+                text = stringResource(R.string.settings_theme),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(6.dp))
+            ThemePreset.entries.forEach { preset ->
+                val available = preset != ThemePreset.DYNAMIC ||
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RadioButton(
+                        selected = settings.themePreset == preset,
+                        onClick = { if (available) vm.setThemePreset(preset) },
+                        enabled = available,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = preset.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (available) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        Text(
+                            text = preset.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    ThemeSwatch(preset, settings.themeMode)
+                }
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                Text(
+                    text = stringResource(R.string.settings_dynamic_unavailable),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+            Text(
+                text = stringResource(R.string.settings_theme_mode),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(6.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { index, m ->
+                    SegmentedButton(
+                        selected = settings.themeMode == m,
+                        onClick = { vm.setThemeMode(m) },
+                        shape = SegmentedButtonDefaults.itemShape(index, ThemeMode.entries.size),
+                    ) { Text(m.label, maxLines = 1) }
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+            Text(
+                text = stringResource(R.string.settings_corner_radius),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = AppShapes.describe(settings.cornerScale),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = settings.cornerScale,
+                onValueChange = vm::setCornerScale,
+                valueRange = AppShapes.MIN_SCALE..AppShapes.MAX_SCALE,
+            )
+
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+            SwitchRow(
+                label = stringResource(R.string.settings_tint_from_artwork),
+                checked = settings.tintFromArtwork,
+                onChange = vm::setTintFromArtwork,
+            )
+            Text(
+                text = stringResource(R.string.settings_tint_from_artwork_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         // ------------------------------------------------------------- tagging
         SectionCard(title = stringResource(R.string.settings_tags)) {
             SwitchRow(
@@ -266,6 +377,30 @@ fun SettingsScreen(vm: AppViewModel) {
         }
 
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ThemeSwatch(preset: ThemePreset, mode: ThemeMode) {
+    // Preview the preset in whichever mode the app is actually using.
+    val dark = when (mode) {
+        ThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
+    val anchors = ThemePalette.anchorsFor(
+        if (preset == ThemePreset.DYNAMIC) ThemePreset.QOBUZ else preset,
+        dark,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf(anchors.primary, anchors.secondary, anchors.surfaceVariant).forEach { c ->
+            Box(
+                Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(c),
+            )
+        }
     }
 }
 

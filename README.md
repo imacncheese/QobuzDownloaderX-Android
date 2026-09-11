@@ -313,6 +313,27 @@ accident.
 > Android rejects an update whose signing certificate differs, and the user has
 > to uninstall first.
 
+## Theming
+
+Settings → **Appearance** controls the whole look:
+
+| Control | Options |
+|---|---|
+| Theme | Qobuz, AMOLED Black, Midnight, Daylight, Match wallpaper (Android 12+) |
+| Light or dark | Follow system, Dark, Light |
+| Corner rounding | Square → pill slider, applied app-wide |
+| Tint from cover art | Derives the accent from the album you open |
+
+Two deliberate choices worth knowing:
+
+- **Dynamic colour (Material You) is opt-in, not the default.** It replaces the palette with
+  wallpaper colours, which made the app look unstyled on Android 12+. Select *Match wallpaper* to use it.
+- **Accents are contrast-checked.** A colour is only adjusted when it falls below a 4.5:1 WCAG
+  contrast target, so the brand purple and artwork colours stay true rather than being washed out.
+
+A preset declares only a few anchor colours; `ThemePalette` derives the full Material 3 role set from
+them, so a new preset cannot leave roles undefined or light/dark out of step.
+
 ## Legal
 
 Not affiliated with, endorsed by, or approved by Qobuz. The Qobuz name and brand are trademarks of
