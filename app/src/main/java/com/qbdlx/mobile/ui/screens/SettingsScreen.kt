@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qbdlx.mobile.R
 import com.qbdlx.mobile.download.Quality
+import com.qbdlx.mobile.settings.TintSource
 import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.theme.AppShapes
 import com.qbdlx.mobile.ui.theme.ThemeMode
@@ -293,13 +294,63 @@ fun SettingsScreen(vm: AppViewModel) {
 
             HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
-            SwitchRow(
-                label = stringResource(R.string.settings_tint_from_artwork),
-                checked = settings.tintFromArtwork,
-                onChange = vm::setTintFromArtwork,
+            Text(
+                text = stringResource(R.string.settings_tint_source),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
             )
             Text(
-                text = stringResource(R.string.settings_tint_from_artwork_hint),
+                text = stringResource(R.string.settings_tint_source_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            TintSource.entries.forEach { source ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RadioButton(
+                        selected = settings.tintSource == source,
+                        onClick = { vm.setTintSource(source) },
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(source.label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = source.description,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = stringResource(R.string.settings_glass),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = if (settings.glassIntensity <= 0.01f) {
+                    stringResource(R.string.settings_glass_off)
+                } else {
+                    stringResource(
+                        R.string.settings_glass_value,
+                        (settings.glassIntensity * 100).toInt(),
+                    )
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = settings.glassIntensity,
+                onValueChange = vm::setGlassIntensity,
+                valueRange = 0f..1f,
+            )
+            Text(
+                text = stringResource(R.string.settings_glass_hint),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -252,5 +252,101 @@ class ThemeTest {
             scheme.primary,
         )
     }
+
+    // ------------------------------------------------------- glass and tinting
+
+    @Test
+    fun `zero intensity is fully opaque and disables glass`() {
+        val glass = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(0f)
+        assertEquals(1f, glass.surfaceAlpha, 0.001f)
+        assertEquals(1f, glass.variantAlpha, 0.001f)
+        assertEquals(0f, glass.backdropAlpha, 0.001f)
+        assertEquals(false, glass.enabled)
+    }
+
+    @Test
+    fun `increasing intensity makes surfaces more translucent`() {
+        val light = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(0.3f)
+        val heavy = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(1f)
+
+        assertTrue("more intensity means lower surface alpha", heavy.surfaceAlpha < light.surfaceAlpha)
+        assertTrue("more intensity means a stronger backdrop", heavy.backdropAlpha > light.backdropAlpha)
+        assertTrue("more intensity means a stronger tint", heavy.tintStrength > light.tintStrength)
+    }
+
+    @Test
+    fun `alphas stay in range across the whole slider`() {
+        // An out-of-range alpha would either vanish or assert at draw time.
+        for (step in 0..20) {
+            val g = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(step / 20f)
+            assertTrue("backdropAlpha $g", g.backdropAlpha in 0f..1f)
+            assertTrue("surfaceAlpha $g", g.surfaceAlpha in 0f..1f)
+            assertTrue("variantAlpha $g", g.variantAlpha in 0f..1f)
+            assertTrue("tintStrength $g", g.tintStrength in 0f..1f)
+        }
+    }
+
+    @Test
+    fun `out of range intensity is clamped rather than extrapolated`() {
+        val below = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(-3f)
+        val above = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(9f)
+        assertEquals(1f, below.surfaceAlpha, 0.001f)
+        assertEquals(
+            com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(1f).surfaceAlpha,
+            above.surfaceAlpha,
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `glass makes the scheme translucent`() {
+        val flat = ThemePalette.schemeFor(ThemePreset.QOBUZ, dark = true)
+        val glassy = ThemePalette.schemeFor(
+            ThemePreset.QOBUZ,
+            dark = true,
+            glass = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(0.8f),
+        )
+
+        assertEquals("flat scheme keeps opaque surfaces", 1f, flat.surface.alpha, 0.001f)
+        assertTrue("glassy scheme lowers surface alpha", glassy.surface.alpha < 1f)
+        assertTrue("glassy scheme lowers background alpha", glassy.background.alpha < 1f)
+    }
+
+    @Test
+    fun `glass tints surfaces toward the accent`() {
+        val accent = Color(0xFFFF0000)
+        val tinted = ThemePalette.schemeFor(
+            ThemePreset.QOBUZ,
+            dark = true,
+            tint = accent,
+            glass = com.qbdlx.mobile.ui.theme.GlassTint.fromIntensity(1f),
+        )
+        val untinted = ThemePalette.schemeFor(
+            ThemePreset.QOBUZ,
+            dark = true,
+            tint = accent,
+            glass = com.qbdlx.mobile.ui.theme.GlassTint.NONE,
+        )
+        // The surface should carry some of the accent rather than staying neutral.
+        assertNotEquals(untinted.surface, tinted.surface)
+    }
+
+    @Test
+    fun `tint source ids round trip`() {
+        com.qbdlx.mobile.settings.TintSource.entries.forEach { source ->
+            assertEquals(
+                source,
+                com.qbdlx.mobile.settings.TintSource.fromId(source.id),
+            )
+        }
+        assertEquals(
+            com.qbdlx.mobile.settings.TintSource.NOW_PLAYING,
+            com.qbdlx.mobile.settings.TintSource.fromId(null),
+        )
+        assertEquals(
+            com.qbdlx.mobile.settings.TintSource.NOW_PLAYING,
+            com.qbdlx.mobile.settings.TintSource.fromId("nonsense"),
+        )
+    }
 }
 

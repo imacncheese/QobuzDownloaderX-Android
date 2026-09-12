@@ -44,14 +44,28 @@ data class PlaybackState(
     val durationMs: Long = 0L,
     val queueSize: Int = 0,
     val queueIndex: Int = 0,
+    val queue: List<QueueItem> = emptyList(),
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
+    val shuffleEnabled: Boolean = false,
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val error: String? = null,
 ) {
     val progress: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 
     val hasItem: Boolean get() = current != null
+
+    /** The track that will play after [current], if any. */
+    val upNext: QueueItem?
+        get() = queue.getOrNull(queueIndex + 1)
+
+    val repeatLabel: String
+        get() = when (repeatMode) {
+            Player.REPEAT_MODE_ONE -> "Repeat one"
+            Player.REPEAT_MODE_ALL -> "Repeat all"
+            else -> "Repeat off"
+        }
 }
 
 /**
@@ -173,6 +187,78 @@ class PlayerController(
         _state.value = PlaybackState()
     }
 
+    // -------------------------------------------------------- shuffle, repeat
+
+    fun toggleShuffle() {
+        val c = controller ?: return
+        val enabled = !c.shuffleModeEnabled
+        c.shuffleModeEnabled = enabled
+        // The playing item must not change when shuffle is toggled, which
+        // ExoPlayer handles; the queue order it reports is the shuffled one.
+        Log.i(TAG, "shuffle ${if (enabled) "on" else "off"}")
+        publish(c)
+    }
+
+    /**
+     * Cycles off, all, one.
+     *
+     * Ordered so the common cases are one tap away: turning repeat all on to loop
+     * an album, then repeat one for a single track, then off.
+     */
+    fun cycleRepeat() {
+        val c = controller ?: return
+        val next = when (c.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+        c.repeatMode = next
+        Log.i(TAG, "repeat mode $next")
+        publish(c)
+    }
+
+    // ------------------------------------------------------------ queue edits
+
+    /** Jumps to a position in the queue as the user sees it. */
+    fun jumpTo(index: Int) {
+        val c = controller ?: return
+        if (index !in 0 until c.mediaItemCount) return
+        c.seekTo(index, 0L)
+        scope.launch { resolveInto(c, index) }
+        publish(c)
+    }
+
+    /**
+     * Moves an item within the queue.
+     *
+     * ExoPlayer keeps the current item playing while its position changes, so no
+     * explicit seek is needed.
+     */
+    fun moveInQueue(from: Int, to: Int) {
+        val c = controller ?: return
+        if (from !in 0 until c.mediaItemCount) return
+        val target = to.coerceIn(0, c.mediaItemCount - 1)
+        if (from == target) return
+        c.moveMediaItem(from, target)
+        publish(c)
+    }
+
+    fun removeFromQueue(index: Int) {
+        val c = controller ?: return
+        if (index !in 0 until c.mediaItemCount) return
+        // Removing the last remaining item clears the player.
+        c.removeMediaItem(index)
+        publish(c)
+    }
+
+    /** Drops everything after the current track. */
+    fun clearUpcoming() {
+        val c = controller ?: return
+        val from = c.currentMediaItemIndex + 1
+        if (from < c.mediaItemCount) c.removeMediaItems(from, c.mediaItemCount)
+        publish(c)
+    }
+
     fun clearError() = _state.update { it.copy(error = null) }
 
     // ------------------------------------------------------------- internals
@@ -219,22 +305,30 @@ class PlayerController(
 
     private fun publish(player: Player) {
         val index = player.currentMediaItemIndex
-        val mediaId = if (index in 0 until player.mediaItemCount) {
-            player.getMediaItemAt(index).mediaId
-        } else {
-            null
+
+        // Read the queue back from the player rather than from our own list: after
+        // a shuffle or a reorder the player's order is the truth, and after an app
+        // restart our list is empty while the service is still playing. Metadata is
+        // reconstructed from each item where the local list has no entry.
+        val ordered = (0 until player.mediaItemCount).mapNotNull { i ->
+            val item = player.getMediaItemAt(i)
+            queue.firstOrNull { it.trackId == item.mediaId } ?: item.toQueueItem()
         }
+
         _state.update {
             it.copy(
-                current = queue.firstOrNull { q -> q.trackId == mediaId } ?: it.current,
+                current = ordered.getOrNull(index) ?: it.current,
                 isPlaying = player.isPlaying,
                 isBuffering = player.playbackState == Player.STATE_BUFFERING,
                 positionMs = player.currentPosition.coerceAtLeast(0L),
                 durationMs = player.duration.takeIf { d -> d > 0 } ?: 0L,
                 queueSize = player.mediaItemCount,
                 queueIndex = index.coerceAtLeast(0),
+                queue = ordered,
                 hasNext = player.hasNextMediaItem(),
                 hasPrevious = player.hasPreviousMediaItem(),
+                shuffleEnabled = player.shuffleModeEnabled,
+                repeatMode = player.repeatMode,
             )
         }
     }
@@ -250,11 +344,38 @@ class PlayerController(
         val builder = MediaItem.Builder()
             .setMediaId(trackId)
             .setMediaMetadata(metadata)
+            // The player lives in the service, which outlives this controller. Any
+            // field the UI needs is therefore carried on the MediaItem itself, so a
+            // fresh controller can rebuild the queue after the app is restarted
+            // rather than seeing an empty queue while audio keeps playing.
+            .setTag(QueueTag(artworkUrl = artworkUrl, durationSeconds = durationSeconds))
 
         // Left unset when unknown so the service resolves lazily; ExoPlayer will
         // report buffering until a URI is swapped in.
         streamUrl?.takeIf { it.isNotBlank() }?.let { builder.setUri(it) }
         return builder.build()
+    }
+
+    /** Extra metadata the UI needs but ExoPlayer does not, carried on the item. */
+    private data class QueueTag(
+        val artworkUrl: String?,
+        val durationSeconds: Int,
+    )
+
+    /** Rebuilds a [QueueItem] from a player media item. */
+    private fun MediaItem.toQueueItem(): QueueItem? {
+        if (mediaId.isBlank()) return null
+        val tag = localConfiguration?.tag as? QueueTag
+        return QueueItem(
+            trackId = mediaId,
+            title = mediaMetadata.title?.toString().orEmpty(),
+            artist = mediaMetadata.artist?.toString().orEmpty(),
+            albumTitle = mediaMetadata.albumTitle?.toString().orEmpty(),
+            artworkUrl = tag?.artworkUrl ?: mediaMetadata.artworkUri?.toString(),
+            durationSeconds = tag?.durationSeconds ?: 0,
+            track = null,
+            streamUrl = localConfiguration?.uri?.toString(),
+        )
     }
 
     private fun describe(e: PlaybackException): String = when (e.errorCode) {

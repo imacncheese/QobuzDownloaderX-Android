@@ -14,8 +14,10 @@ import androidx.compose.ui.platform.LocalContext
  * Resolves the active theme.
  *
  * Dynamic colour is opt-in ([ThemePreset.DYNAMIC]) rather than the default, so the
- * chosen preset is actually the palette the user sees. [accentOverride] lets the
- * currently open album's cover art drive the accent colour.
+ * chosen preset is actually the palette the user sees.
+ *
+ * [accentOverride] lets cover art drive the accent colour, and [glass] makes the
+ * surfaces translucent and tinted. Neither has any effect at its neutral value.
  */
 @Composable
 fun QobuzDlxTheme(
@@ -23,6 +25,7 @@ fun QobuzDlxTheme(
     mode: ThemeMode = ThemeMode.SYSTEM,
     cornerScale: Float = AppShapes.DEFAULT_SCALE,
     accentOverride: Color? = null,
+    glass: GlassTint = GlassTint.NONE,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -36,14 +39,18 @@ fun QobuzDlxTheme(
 
     val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
+    // Wallpaper colours already carry their own surfaces, so the glass treatment
+    // is not applied on top of them: it would fight the platform palette.
+    val useDynamic = preset == ThemePreset.DYNAMIC && dynamicAvailable && accentOverride == null
+
     val colorScheme = when {
-        preset == ThemePreset.DYNAMIC && dynamicAvailable && accentOverride == null ->
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        useDynamic -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 
         else -> ThemePalette.schemeFor(
             preset = if (preset == ThemePreset.DYNAMIC) ThemePreset.QOBUZ else preset,
             dark = dark,
             tint = accentOverride?.let { ThemePalette.legibleAccent(it, dark) },
+            glass = glass,
         )
     }
 

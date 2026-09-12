@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -49,12 +50,15 @@ import com.qbdlx.mobile.ui.screens.ArtistScreen
 import com.qbdlx.mobile.ui.screens.DownloadsScreen
 import com.qbdlx.mobile.ui.screens.LoginScreen
 import com.qbdlx.mobile.ui.screens.PlaylistScreen
+import com.qbdlx.mobile.ui.screens.QueueScreen
 import com.qbdlx.mobile.ui.screens.SearchScreen
 import com.qbdlx.mobile.ui.screens.SettingsScreen
 import com.qbdlx.mobile.settings.SettingsStore
+import com.qbdlx.mobile.settings.TintSource
 import com.qbdlx.mobile.ui.components.FullPlayer
 import com.qbdlx.mobile.ui.components.MiniPlayerBar
 import com.qbdlx.mobile.ui.theme.QobuzDlxTheme
+import com.qbdlx.mobile.ui.theme.TintBackdrop
 import com.qbdlx.mobile.ui.theme.rememberArtworkAccent
 
 class MainActivity : ComponentActivity() {
@@ -131,17 +135,26 @@ private fun detailFromKey(key: String?): DetailTarget? {
 @Composable
 private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
     val session by vm.signedIn.collectAsStateWithLifecycle()
-
-    // Artwork-derived accent, resolved once for the currently open album and fed
-    // into the theme so the whole UI picks up the cover's colour.
     val albumState by vm.album.collectAsStateWithLifecycle()
-    val coverUrl = artworkUrl(
+    val playback by vm.playback.collectAsStateWithLifecycle()
+
+    val openAlbumArtwork = artworkUrl(
         albumState.album?.image?.large ?: albumState.album?.image?.small,
         size = 300,
     )
+    val playingArtwork = playback.current?.artworkUrl
+
+    // The tint follows whichever source the user picked. Now-playing takes
+    // priority so the colour moves with the music as the queue advances, rather
+    // than staying on whichever album screen happens to be open.
+    val tintArtwork = when (settings.tintSource) {
+        TintSource.NOW_PLAYING -> playingArtwork ?: openAlbumArtwork
+        TintSource.OPEN_ALBUM -> openAlbumArtwork ?: playingArtwork
+        TintSource.OFF -> null
+    }
     val accent by rememberArtworkAccent(
-        artworkUrl = coverUrl,
-        enabled = settings.tintFromArtwork,
+        artworkUrl = tintArtwork,
+        enabled = settings.tintSource != TintSource.OFF,
     )
 
     QobuzDlxTheme(
@@ -149,42 +162,63 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
         mode = settings.themeMode,
         cornerScale = settings.cornerScale,
         accentOverride = accent,
+        glass = settings.glass,
     ) {
-        if (session == null) {
-            LoginScreen(vm)
-            return@QobuzDlxTheme
+        // The backdrop sits behind everything, including the login screen, so the
+        // whole app shares one tint instead of only the signed-in screens.
+        Box(Modifier.fillMaxSize()) {
+            TintBackdrop(
+                artworkUrl = tintArtwork,
+                alpha = settings.glass.backdropAlpha,
+            )
+            if (session == null) {
+                LoginScreen(vm)
+            } else {
+                AppContent(vm, playback)
+            }
         }
+    }
+}
 
+@Composable
+private fun AppContent(
+    vm: AppViewModel,
+    playback: com.qbdlx.mobile.playback.PlaybackState,
+) {
         var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
         var detailKey by rememberSaveable { mutableStateOf<String?>(null) }
         var playerExpanded by rememberSaveable { mutableStateOf(false) }
+        var queueOpen by rememberSaveable { mutableStateOf(false) }
 
         val detail = detailFromKey(detailKey)
         fun open(target: DetailTarget?) { detailKey = target?.toKey() }
 
-        val playback by vm.playback.collectAsStateWithLifecycle()
-
         // The media session service is only started when something can play, so
         // launching the app without signing in does not spin up a service.
-        LaunchedEffect(session) { vm.connectPlayer() }
+        LaunchedEffect(Unit) { vm.connectPlayer() }
         DisposableEffect(Unit) { onDispose { vm.releasePlayer() } }
 
         // Reset the detail view when the user switches tabs.
         LaunchedEffect(tab) { open(null) }
 
-        if (playerExpanded && playback.hasItem) {
+        // The player and the queue take over the screen when open. Written as
+        // branches rather than early returns so this stays a single composable.
+        if (queueOpen && playback.hasItem) {
+            QueueScreen(vm, onBack = { queueOpen = false })
+        } else if (playerExpanded && playback.hasItem) {
             FullPlayer(
                 state = playback,
                 onTogglePlay = vm::togglePlayPause,
                 onNext = vm::nextTrack,
                 onPrevious = vm::previousTrack,
                 onSeek = vm::seekTo,
+                onToggleShuffle = vm::toggleShuffle,
+                onCycleRepeat = vm::cycleRepeatMode,
+                onOpenQueue = { queueOpen = true },
                 onCollapse = { playerExpanded = false },
             )
-            return@QobuzDlxTheme
-        }
-
-        AnimatedContent(
+        } else {
+            AnimatedContent(
             targetState = detail,
             transitionSpec = {
                 // Slide the detail view in over the list, and back out on close.
@@ -221,6 +255,10 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
                 }
             } else {
                 Scaffold(
+                    // Transparent so the tinted artwork backdrop behind the
+                    // Scaffold is visible; the window itself paints the base
+                    // colour, so nothing shows through to the launcher.
+                    containerColor = Color.Transparent,
                     bottomBar = {
                         Column {
                             // Mini player rides above the navigation bar so it is

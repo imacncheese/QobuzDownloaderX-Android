@@ -16,11 +16,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.media3.common.Player
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -140,6 +145,30 @@ fun MiniPlayerBar(
                     )
                 }
             }
+
+            // Up next: shows what follows without opening the queue. Kept to one
+            // line so the mini player stays compact.
+            state.upNext?.let { next ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 66.dp, end = 12.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Next  ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = "${next.title} · ${next.artist}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -157,6 +186,9 @@ fun FullPlayer(
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onSeek: (Long) -> Unit,
+    onToggleShuffle: () -> Unit,
+    onCycleRepeat: () -> Unit,
+    onOpenQueue: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val item = state.current
@@ -302,6 +334,50 @@ fun FullPlayer(
                 }
                 IconButton(onClick = onNext, enabled = state.hasNext) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(40.dp))
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Shuffle and repeat signal "on" through colour, which avoids
+                // adding extra chrome to say the same thing.
+                IconButton(onClick = onToggleShuffle) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                        tint = if (state.shuffleEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                IconButton(onClick = onCycleRepeat) {
+                    Icon(
+                        imageVector = if (state.repeatMode == Player.REPEAT_MODE_ONE) {
+                            Icons.Filled.RepeatOne
+                        } else {
+                            Icons.Filled.Repeat
+                        },
+                        contentDescription = state.repeatLabel,
+                        tint = if (state.repeatMode == Player.REPEAT_MODE_OFF) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                    )
+                }
+                IconButton(onClick = onOpenQueue) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "Queue",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 

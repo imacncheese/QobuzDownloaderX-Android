@@ -187,6 +187,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     _search.update { it.copy(playlists = page.items, loading = false, hasSearched = true) }
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Expected: the debounce cancels the previous search on every keystroke.
+            // Treating this as a failure surfaced raw text like "Job was cancelled"
+            // in the error pane.
+            throw e
         } catch (e: Throwable) {
             _search.update { it.copy(loading = false, error = friendly(e), hasSearched = true) }
         }
@@ -517,6 +522,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun stopPlayback() = playerController.stop()
     fun clearPlaybackError() = playerController.clearError()
 
+    fun toggleShuffle() = playerController.toggleShuffle()
+    fun cycleRepeatMode() = playerController.cycleRepeat()
+    fun jumpToQueueIndex(index: Int) = playerController.jumpTo(index)
+    fun moveQueueItem(from: Int, to: Int) = playerController.moveInQueue(from, to)
+    fun removeQueueItem(index: Int) = playerController.removeFromQueue(index)
+    fun clearUpcomingTracks() = playerController.clearUpcoming()
+
     private fun Track.toQueueItem(album: Album?): QueueItem {
         val resolvedAlbum = album ?: this.album
         return QueueItem(
@@ -548,11 +560,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setThemeMode(mode: com.qbdlx.mobile.ui.theme.ThemeMode) = settings.setThemeMode(mode)
     fun setCornerScale(scale: Float) = settings.setCornerScale(scale)
-    fun setTintFromArtwork(enabled: Boolean) = settings.setTintFromArtwork(enabled)
+    fun setTintSource(source: com.qbdlx.mobile.settings.TintSource) =
+        settings.setTintSource(source)
+
+    fun setGlassIntensity(value: Float) = settings.setGlassIntensity(value)
     fun setCustomTreeUri(uri: android.net.Uri?) = settings.setCustomTreeUri(uri)
     fun setTagOption(key: String, value: Boolean) = settings.setTagOption(key, value)
 
     private fun friendly(e: Throwable): String = when (e) {
+        is kotlinx.coroutines.CancellationException -> "Cancelled"
         is QobuzApiException.Http -> e.message ?: "Request failed"
         is QobuzApiException.Auth -> e.message ?: "Authentication failed"
         is QobuzApiException.Network -> e.message ?: "Network error"

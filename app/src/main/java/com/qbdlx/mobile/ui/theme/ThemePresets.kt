@@ -69,6 +69,57 @@ enum class ThemeMode(val id: String, val label: String) {
 }
 
 /**
+ * How translucent and tinted the surfaces are.
+ *
+ * Kept as one value rather than scattered alpha constants so the whole app can be
+ * made more or less glassy from a single setting, and so the palette stays
+ * internally consistent.
+ */
+data class GlassTint(
+    /** Overlay opacity of the blurred artwork behind everything. */
+    val backdropAlpha: Float,
+    /** Alpha applied to `surface` family roles. */
+    val surfaceAlpha: Float,
+    /** Alpha applied to container and variant roles. */
+    val variantAlpha: Float,
+    /** How far surfaces are pulled toward the artwork accent. */
+    val tintStrength: Float,
+) {
+    val enabled: Boolean get() = backdropAlpha > 0f || surfaceAlpha < 1f
+
+    companion object {
+        val NONE = GlassTint(
+            backdropAlpha = 0f,
+            surfaceAlpha = 1f,
+            variantAlpha = 1f,
+            tintStrength = 0f,
+        )
+
+        /**
+         * Translucent over the backdrop but not so much that text stops being
+         * readable: these alphas keep body text well clear of the 4.5:1 target on
+         * both the tinted backdrop and a flat background.
+         */
+        val DEFAULT = GlassTint(
+            backdropAlpha = 0.85f,
+            surfaceAlpha = 0.72f,
+            variantAlpha = 0.55f,
+            tintStrength = 0.18f,
+        )
+
+        fun fromIntensity(value: Float): GlassTint {
+            val v = value.coerceIn(0f, 1f)
+            return if (v <= 0.01f) NONE else GlassTint(
+                backdropAlpha = 0.55f + 0.35f * v,
+                surfaceAlpha = 1f - 0.34f * v,
+                variantAlpha = 1f - 0.5f * v,
+                tintStrength = 0.08f + 0.18f * v,
+            )
+        }
+    }
+}
+
+/**
  * Derives a complete [ColorScheme] from a few anchor colours.
  *
  * Everything is computed rather than hand-listed so that adding a preset cannot
@@ -85,6 +136,14 @@ object ThemePalette {
         val surfaceVariant: Color,
         val onBackground: Color,
         val onSurfaceVariant: Color,
+        /**
+         * Always-opaque version of [background].
+         *
+         * The window background cannot be translucent, and `ColorScheme.background`
+         * has to be transparent under the glass treatment so the artwork backdrop
+         * shows through. Both values are therefore needed.
+         */
+        val windowBackground: Color = background,
     )
 
     fun anchorsFor(preset: ThemePreset, dark: Boolean): Anchors = when (preset) {
@@ -166,72 +225,103 @@ object ThemePalette {
     }
 
     /**
-     * Builds the full role set. [tint] optionally overrides the accent roles so
-     * album artwork can drive the palette.
+     * Builds the full role set.
+     *
+     * [tint] optionally overrides the accent roles so album artwork can drive the
+     * palette. [glass] controls how translucent and tinted surfaces are.
      */
     fun schemeFor(
         preset: ThemePreset,
         dark: Boolean,
         tint: Color? = null,
+        glass: GlassTint = GlassTint.NONE,
     ): ColorScheme {
         val a = anchorsFor(preset, dark)
         val primary = tint ?: a.primary
         val onPrimary = if (dark) Color(0xFF1B0F3A) else Color.White
 
+        // Surfaces become translucent when glass is on, so the backdrop behind
+        // them shows through. Everything that reads `surfaceVariant` or
+        // `surfaceContainer` picks this up with no per-screen changes.
+        val surfaceAlpha = glass.surfaceAlpha
+        val variantAlpha = glass.variantAlpha
+
+        // Tint the surface itself toward the accent, so the whole UI inherits the
+        // colour instead of only the buttons.
+        fun glaze(base: Color, strength: Float): Color =
+            if (tint == null || strength <= 0f) base
+            else lerp(base, tint, strength)
+
+        val background = glaze(a.background, glass.tintStrength * 0.35f)
+        // Transparent only when glass is on, so the backdrop behind the Scaffold is
+        // visible. With glass off this is the flat colour as before.
+        val schemeBackground = if (glass.enabled) Color.Transparent else background
+        val surface = glaze(a.surface, glass.tintStrength).copy(alpha = surfaceAlpha)
+        val surfaceVariant = glaze(a.surfaceVariant, glass.tintStrength * 0.8f)
+            .copy(alpha = variantAlpha)
+
         return if (dark) darkColorScheme(
             primary = primary,
             onPrimary = onPrimary,
-            primaryContainer = lerp(primary, a.surface, 0.62f),
+            primaryContainer = lerp(primary, a.surface, 0.62f).copy(alpha = variantAlpha),
             onPrimaryContainer = lerp(primary, Color.White, 0.72f),
             secondary = a.secondary,
             onSecondary = Color(0xFF00201E),
-            secondaryContainer = lerp(a.secondary, a.surface, 0.68f),
+            secondaryContainer = lerp(a.secondary, a.surface, 0.68f).copy(alpha = variantAlpha),
             onSecondaryContainer = lerp(a.secondary, Color.White, 0.75f),
             tertiary = lerp(primary, a.secondary, 0.5f),
-            background = a.background,
+            // `background` stays opaque: it is the window background, so making it
+            // translucent would blend with black behind the window and wash the
+            // whole app grey. Translucency belongs on the layers above it.
+            background = schemeBackground,
             onBackground = a.onBackground,
-            surface = a.surface,
+            surface = surface,
             onSurface = a.onBackground,
-            surfaceVariant = a.surfaceVariant,
+            surfaceVariant = surfaceVariant,
             onSurfaceVariant = a.onSurfaceVariant,
-            surfaceContainerLowest = if (preset == ThemePreset.AMOLED) Color.Black else lerp(a.surface, a.background, 0.45f),
-            surfaceContainerLow = a.surface,
-            surfaceContainer = lerp(a.surface, a.surfaceVariant, 0.45f),
-            surfaceContainerHigh = lerp(a.surface, a.surfaceVariant, 0.75f),
-            surfaceContainerHighest = a.surfaceVariant,
+            surfaceContainerLowest = if (preset == ThemePreset.AMOLED) {
+                Color.Black.copy(alpha = surfaceAlpha)
+            } else {
+                lerp(a.surface, a.background, 0.45f).copy(alpha = surfaceAlpha)
+            },
+            surfaceContainerLow = surface,
+            surfaceContainer = lerp(a.surface, a.surfaceVariant, 0.45f).copy(alpha = variantAlpha),
+            surfaceContainerHigh = lerp(a.surface, a.surfaceVariant, 0.75f).copy(alpha = variantAlpha),
+            surfaceContainerHighest = surfaceVariant,
             outline = lerp(a.onSurfaceVariant, a.surface, 0.42f),
             outlineVariant = lerp(a.onSurfaceVariant, a.surface, 0.74f),
             error = Color(0xFFFFB4AB),
             onError = Color(0xFF690005),
-            errorContainer = Color(0xFF5C1A16),
+            errorContainer = Color(0xFF5C1A16).copy(alpha = variantAlpha),
             onErrorContainer = Color(0xFFFFDAD6),
             scrim = Color.Black,
         ) else lightColorScheme(
             primary = primary,
             onPrimary = onPrimary,
-            primaryContainer = lerp(primary, Color.White, 0.82f),
+            primaryContainer = lerp(primary, Color.White, 0.82f).copy(alpha = variantAlpha),
             onPrimaryContainer = lerp(primary, Color.Black, 0.55f),
             secondary = a.secondary,
             onSecondary = Color.White,
-            secondaryContainer = lerp(a.secondary, Color.White, 0.82f),
+            secondaryContainer = lerp(a.secondary, Color.White, 0.82f).copy(alpha = variantAlpha),
             onSecondaryContainer = lerp(a.secondary, Color.Black, 0.6f),
             tertiary = lerp(primary, a.secondary, 0.5f),
-            background = a.background,
+            // Opaque for the same reason as the dark scheme above.
+            background = schemeBackground,
             onBackground = a.onBackground,
-            surface = a.surface,
+            surface = surface,
             onSurface = a.onBackground,
-            surfaceVariant = a.surfaceVariant,
+            surfaceVariant = surfaceVariant,
             onSurfaceVariant = a.onSurfaceVariant,
-            surfaceContainerLowest = Color.White,
-            surfaceContainerLow = a.surface,
-            surfaceContainer = lerp(a.surface, a.surfaceVariant, 0.5f),
-            surfaceContainerHigh = lerp(a.surface, a.surfaceVariant, 0.78f),
-            surfaceContainerHighest = a.surfaceVariant,
+            surfaceContainerLowest = Color.White.copy(alpha = surfaceAlpha),
+            surfaceContainerLow = surface,
+            surfaceContainer = lerp(a.surface, a.surfaceVariant, 0.5f).copy(alpha = variantAlpha),
+            surfaceContainerHigh = lerp(a.surface, a.surfaceVariant, 0.78f).copy(alpha = variantAlpha),
+            surfaceContainerHighest = surfaceVariant,
             outline = lerp(a.onSurfaceVariant, a.surface, 0.35f),
             outlineVariant = lerp(a.onSurfaceVariant, a.surface, 0.7f),
             error = Color(0xFFB3261E),
             onError = Color.White,
-            errorContainer = Color(0xFFF9DEDC),
+            errorContainer = Color(0xFFF9DEDC).copy(alpha = variantAlpha),
             onErrorContainer = Color(0xFF410E0B),
             scrim = Color.Black,
         )

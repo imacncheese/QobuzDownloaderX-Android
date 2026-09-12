@@ -8,12 +8,42 @@ import com.qbdlx.mobile.download.MetadataTagger
 import com.qbdlx.mobile.download.Quality
 import com.qbdlx.mobile.download.RenameTemplates
 import com.qbdlx.mobile.ui.theme.AppShapes
+import com.qbdlx.mobile.ui.theme.GlassTint
 import com.qbdlx.mobile.ui.theme.ThemeMode
 import com.qbdlx.mobile.ui.theme.ThemePreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+
+/**
+ * Where the app's tint colour comes from.
+ *
+ * [NOW_PLAYING] is the default: it follows whatever is actually playing, which is
+ * what people expect from a player, and it keeps changing as the queue advances.
+ */
+enum class TintSource(val id: String, val label: String, val description: String) {
+    NOW_PLAYING(
+        id = "now_playing",
+        label = "Now playing",
+        description = "Follow the track that is playing, including from the queue",
+    ),
+    OPEN_ALBUM(
+        id = "open_album",
+        label = "Open album",
+        description = "Use the cover of the album you are looking at",
+    ),
+    OFF(
+        id = "off",
+        label = "Off",
+        description = "Use the theme's own colours only",
+    );
+
+    companion object {
+        fun fromId(id: String?): TintSource =
+            entries.firstOrNull { it.id == id } ?: NOW_PLAYING
+    }
+}
 
 /**
  * Small SharedPreferences-backed settings store exposed as a StateFlow so
@@ -48,9 +78,15 @@ class SettingsStore(context: Context) {
         val themeMode: ThemeMode = ThemeMode.SYSTEM,
         /** Global corner rounding, 0 (square) to 2 (pill). */
         val cornerScale: Float = AppShapes.DEFAULT_SCALE,
-        /** Tint the UI from the currently open album's cover art. */
-        val tintFromArtwork: Boolean = false,
-    )
+
+        /** Where the tint colour comes from. */
+        val tintSource: TintSource = TintSource.NOW_PLAYING,
+        /** How translucent and tinted the UI is, 0 (flat) to 1 (heavy). */
+        val glassIntensity: Float = 0.6f,
+    ) {
+        /** Derived translucency, so callers do not recompute the mapping. */
+        val glass: GlassTint get() = GlassTint.fromIntensity(glassIntensity)
+    }
 
     private val _state = MutableStateFlow(load())
     val state: StateFlow<Settings> = _state.asStateFlow()
@@ -74,7 +110,15 @@ class SettingsStore(context: Context) {
         cornerScale = AppShapes.clamp(
             prefs.getFloat(KEY_CORNER_SCALE, AppShapes.DEFAULT_SCALE)
         ),
-        tintFromArtwork = prefs.getBoolean(KEY_TINT_FROM_ART, false),
+        // Migrates the old boolean: if it was on, keep the user on the album
+        // source rather than silently switching them to now-playing.
+        tintSource = run {
+            val stored = prefs.getString(KEY_TINT_SOURCE, null)
+            if (stored != null || prefs.contains(KEY_TINT_SOURCE)) TintSource.fromId(stored)
+            else if (legacyTintEnabled()) TintSource.OPEN_ALBUM
+            else TintSource.NOW_PLAYING
+        },
+        glassIntensity = prefs.getFloat(KEY_GLASS_INTENSITY, 0.6f).coerceIn(0f, 1f),
         tag = MetadataTagger.Options(
             writeAlbumTitle = prefs.getBoolean("tag_album", true),
             writeAlbumArtist = prefs.getBoolean("tag_album_artist", true),
@@ -119,7 +163,12 @@ class SettingsStore(context: Context) {
     fun setThemePreset(preset: ThemePreset) = edit { putString(KEY_THEME_PRESET, preset.id) }
     fun setThemeMode(mode: ThemeMode) = edit { putString(KEY_THEME_MODE, mode.id) }
     fun setCornerScale(scale: Float) = edit { putFloat(KEY_CORNER_SCALE, AppShapes.clamp(scale)) }
-    fun setTintFromArtwork(enabled: Boolean) = edit { putBoolean(KEY_TINT_FROM_ART, enabled) }
+
+    fun setTintSource(source: TintSource) = edit { putString(KEY_TINT_SOURCE, source.id) }
+    fun setGlassIntensity(value: Float) = edit { putFloat(KEY_GLASS_INTENSITY, value.coerceIn(0f, 1f)) }
+
+    private fun legacyTintEnabled(): Boolean =
+        prefs.getBoolean(KEY_TINT_FROM_ART_LEGACY, false)
 
     fun setTagOption(key: String, value: Boolean) = edit { putBoolean(key, value) }
     fun setTagCommentText(v: String) = edit { putString("tag_comment_text", v) }
@@ -142,6 +191,9 @@ class SettingsStore(context: Context) {
         private const val KEY_THEME_PRESET = "theme_preset"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_CORNER_SCALE = "theme_corner_scale"
-        private const val KEY_TINT_FROM_ART = "theme_tint_from_artwork"
+        private const val KEY_TINT_SOURCE = "theme_tint_source"
+        private const val KEY_GLASS_INTENSITY = "theme_glass_intensity"
+        /** Superseded by KEY_TINT_SOURCE; read once for migration. */
+        private const val KEY_TINT_FROM_ART_LEGACY = "theme_tint_from_artwork"
     }
 }

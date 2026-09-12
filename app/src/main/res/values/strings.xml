@@ -51,6 +51,11 @@
     <string name="playlist_unavailable">Could not load this playlist. Go back and try again.</string>
     <string name="play_all">Play all</string>
     <string name="download_playlist">Download playlist</string>
+    <string name="queue_title">Queue</string>
+    <string name="queue_position">Track %1$d of %2$d</string>
+    <string name="queue_empty">Nothing queued. Play an album or a track to fill this up.</string>
+    <string name="queue_clear_upcoming">Clear upcoming</string>
+    <string name="queue_remove">Remove from queue</string>
     <string name="album_loading">Loading release…</string>
     <string name="album_no_tracks_hint">Qobuz returned no tracks for this release. It may be unavailable in your region or plan.</string>
     <string name="tracks_count">%1$d tracks</string>
@@ -95,6 +100,12 @@
     <string name="settings_corner_radius">Corner rounding</string>
     <string name="settings_tint_from_artwork">Tint the app from cover art</string>
     <string name="settings_tint_from_artwork_hint">Uses the dominant colour of the album you open, so the interface picks up its palette.</string>
+    <string name="settings_tint_source">Colour source</string>
+    <string name="settings_tint_source_hint">Where the tint colour is taken from.</string>
+    <string name="settings_glass">Transparency</string>
+    <string name="settings_glass_off">Off, solid surfaces</string>
+    <string name="settings_glass_value">%1$d%%</string>
+    <string name="settings_glass_hint">Makes bars, cards and sheets translucent so the artwork backdrop shows through. Turn down if text is hard to read.</string>
     <string name="settings_dynamic_unavailable">Wallpaper colours need Android 12 or newer and are unavailable on this device.</string>
     <string name="settings_signed_in_as">Signed in as %1$s</string>
     <string name="settings_subscription">Plan: %1$s</string>
