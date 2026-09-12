@@ -27,6 +27,28 @@ function Ok($m)   { Write-Host "  [ok] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  [!] $m" -ForegroundColor Yellow }
 function Die($m)  { Write-Host "  [x] $m" -ForegroundColor Red; exit 1 }
 
+<#
+  Runs git and returns its exit code.
+
+  git writes its progress to stderr, and Windows PowerShell 5.1 turns a native
+  command's stderr into a terminating error while $ErrorActionPreference is
+  Stop. That aborted the script in the middle of a push: the commit went up, the
+  tag and the release did not. Callers check the exit code themselves, so stderr
+  is treated as output here rather than as a failure.
+#>
+function Invoke-Git {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & git @args 2>&1
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $output | ForEach-Object { Info $_ }
+    return $code
+}
+
 Write-Host ""
 
 # ---------------------------------------------------------------- 1. git repo
@@ -157,8 +179,7 @@ Info "pushing main..."
 # Pass the token inline so no interactive prompt is attempted; the URL is not
 # persisted because the remote itself is configured without credentials.
 $pushUrl = "https://x-access-token:$token@github.com/$Owner/$Repo.git"
-git push $pushUrl "HEAD:refs/heads/main" --force 2>&1 | ForEach-Object { Info $_ }
-if ($LASTEXITCODE -ne 0) { Die "git push failed" }
+if ((Invoke-Git push $pushUrl "HEAD:refs/heads/main" --force) -ne 0) { Die "git push failed" }
 Ok "pushed main"
 
 # ------------------------------------------------------------------ 6. tag
@@ -167,7 +188,7 @@ else {
     git tag -a $Tag -m "QobuzDLX for Android $Tag"
     Ok "created tag $Tag"
 }
-git push $pushUrl "refs/tags/$Tag" 2>&1 | ForEach-Object { Info $_ }
+if ((Invoke-Git push $pushUrl "refs/tags/$Tag") -ne 0) { Die "git push of tag $Tag failed" }
 Ok "pushed tag $Tag"
 
 # -------------------------------------------------------------- 7. release
