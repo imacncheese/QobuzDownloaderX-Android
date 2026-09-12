@@ -221,6 +221,7 @@ private fun AppContent(
     vm: AppViewModel,
     playback: com.qbdlx.mobile.playback.PlaybackState,
 ) {
+        val lyricsState by vm.lyrics.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
         var detailKey by rememberSaveable { mutableStateOf<String?>(null) }
         var playerExpanded by rememberSaveable { mutableStateOf(false) }
@@ -255,6 +256,8 @@ private fun AppContent(
         } else if (playerExpanded && playback.hasItem) {
             FullPlayer(
                 state = playback,
+                lyrics = lyricsState,
+                lyricsPositionMs = vm.lyricsPositionMs,
                 onTogglePlay = vm::togglePlayPause,
                 onNext = vm::nextTrack,
                 onPrevious = vm::previousTrack,
@@ -263,6 +266,8 @@ private fun AppContent(
                 onCycleRepeat = vm::cycleRepeatMode,
                 onOpenQueue = { queueOpen = true },
                 onDownload = vm::downloadCurrentTrack,
+                onToggleLyrics = vm::toggleLyrics,
+                onReloadLyrics = vm::reloadLyrics,
                 onCollapse = { playerExpanded = false },
             )
         } else {

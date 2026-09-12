@@ -13,8 +13,8 @@ android {
         applicationId = "com.qbdlx.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.7.0"
+        versionCode = 17
+        versionName = "1.8.0"
         vectorDrawables { useSupportLibrary = true }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -136,6 +136,9 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation("junit:junit:4.13.2")
+    // The lyrics service is exercised over a real HTTP stack rather than by
+    // stubbing the repository, so the request shape and JSON parsing are covered.
+    testImplementation(libs.okhttp.mockwebserver)
 
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

@@ -243,6 +243,12 @@ object RenameTemplates {
         "flac" -> "audio/flac"
         "m4a" -> "audio/mp4"
         "ogg" -> "audio/ogg"
+        // Deliberately not text/plain. Android's document providers append the
+        // extension registered for a MIME type when the file name does not
+        // already end with it, so a .lrc written as text/plain lands on disk as
+        // "track.lrc.txt". Nothing claims application/x-lrc, so the name is left
+        // exactly as given.
+        "lrc" -> "application/x-lrc"
         else -> "application/octet-stream"
     }
 }

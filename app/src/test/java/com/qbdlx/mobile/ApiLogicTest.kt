@@ -373,6 +373,20 @@ class ApiLogicTest {
         assertEquals("audio/mpeg", RenameTemplates.mimeFor("mp3"))
     }
 
+    /**
+     * Regression: a .lrc sidecar written as text/plain landed on disk as
+     * "track.lrc.txt", because Android's document providers append the
+     * extension registered for the MIME type when the file name does not
+     * already end with it.
+     */
+    @Test
+    fun `the lrc mime type does not make providers rename the sidecar`() {
+        val mime = RenameTemplates.mimeFor("lrc")
+
+        assertTrue("text/plain makes the provider append .txt: $mime", mime != "text/plain")
+        assertTrue("octet-stream makes the provider append .bin: $mime", mime != "application/octet-stream")
+    }
+
     @Test
     fun `album title appends the version in parentheses`() {
         assertEquals("Kind of Blue (Mono)", RenameTemplates.albumTitle(album))

@@ -26,6 +26,15 @@ object AppGraph {
     lateinit var storage: StorageManager
         private set
 
+    /**
+     * Lyrics come from an external service rather than Qobuz, and the session
+     * cache is only useful if the UI and the download engine share one instance:
+     * playing a track then downloading it should not look the lyrics up twice.
+     */
+    val lyrics: com.qbdlx.mobile.lyrics.LyricsRepository by lazy {
+        com.qbdlx.mobile.lyrics.LyricsRepository()
+    }
+
     @Volatile
     var downloadEngine: DownloadEngine? = null
         private set
@@ -89,6 +98,7 @@ object AppGraph {
                 client = client,
                 settings = settings,
                 storage = storage,
+                lyrics = lyrics,
             )
             initialised = true
         }

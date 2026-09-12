@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.8.0
+
+Synced lyrics, and lyrics embedded in the files you download.
+
+Qobuz exposes no lyrics through its own API, so these come from
+[LRCLIB](https://lrclib.net), which needs no account and returns both a plain
+block and an LRC-timed one. Two settings control it, both on by default: embed
+lyrics in each file, and write a `.lrc` next to the track.
+
+- The player has a lyrics button. It shows the timed lines, highlights the
+  current one, scrolls itself, and jumps to a line when you tap it. Lyrics for
+  the next track load on their own as the queue advances. When only a plain
+  block exists that is shown instead, rather than pretending to sync.
+- Downloads carry the lyrics. FLAC gets `LYRICS` and `SYNCEDLYRICS` comments;
+  MP3 gets a `USLT` frame for the text and a real `SYLT` frame for the timing.
+  The optional sidecar is written as `.lrc`.
+- A lookup never costs you a download: if the service is down or has nothing,
+  the file is written without lyrics and everything else proceeds.
+
+Three things here only showed up on a device:
+
+- A `.lrc` sidecar written as `text/plain` landed on disk as
+  `track.lrc.txt`. Android's document providers append the extension registered
+  for a MIME type when the file name does not already end with it. It now goes
+  out as `application/x-lrc`, which nothing claims, so the name is left alone.
+- The first version of the lyrics view read the playback position straight off a
+  `StateFlow` inside a composable. Compose cannot observe that, so the highlight
+  only moved when some unrelated player event forced a redraw and it drifted
+  several seconds out of step. It is collected now.
+- A freshly tagged MP3 gets an ID3v2.3 tag, and `ID3v23Tag` has no public
+  `addFrame`. The `SYLT` frame goes in through `addField` with a v2.3 frame
+  instead, because a v2.4 frame inside a v2.3 tag produces a file no reader can
+  parse.
+
 ## 1.7.0
 
 New downloads had no cover art and landed in the wrong folder. There were three

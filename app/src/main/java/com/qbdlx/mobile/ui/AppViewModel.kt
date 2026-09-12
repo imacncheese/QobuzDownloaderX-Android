@@ -20,6 +20,9 @@ import com.qbdlx.mobile.download.DownloadQueue
 import com.qbdlx.mobile.download.DownloadService
 import com.qbdlx.mobile.download.DownloadState
 import com.qbdlx.mobile.download.Quality
+import com.qbdlx.mobile.lyrics.LyricsRepository
+import com.qbdlx.mobile.lyrics.LyricsResult
+import com.qbdlx.mobile.lyrics.LyricsUi
 import com.qbdlx.mobile.playback.PlaybackState
 import com.qbdlx.mobile.playback.QueueItem
 import kotlinx.coroutines.Job
@@ -27,11 +30,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonPrimitive
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
+
+    private companion object {
+        /**
+         * How often the lyrics view re-reads the playback position. Four times
+         * a second is enough for a highlight that reads as immediate, and is far
+         * cheaper than recomposing the player on every frame.
+         */
+        const val LYRICS_TICK_MS = 250L
+    }
 
     private val client: QobuzClient = AppGraph.client
     private val sessions = AppGraph.sessions
@@ -537,6 +552,95 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearFinishedDownloads() = DownloadQueue.clearFinished()
 
+    // --------------------------------------------------------------- lyrics
+
+    private val _lyrics = MutableStateFlow(LyricsUi())
+    val lyrics: StateFlow<LyricsUi> = _lyrics.asStateFlow()
+
+    private val lyricsRepository: LyricsRepository by lazy { AppGraph.lyrics }
+
+    /**
+     * Playback position for the lyrics view only.
+     *
+     * Kept apart from [playback] because it ticks several times a second, and
+     * folding it into the shared player state would recompose the whole player,
+     * seek bar included, on every tick.
+     */
+    private val _lyricsPositionMs = MutableStateFlow(0L)
+    val lyricsPositionMs: StateFlow<Long> = _lyricsPositionMs.asStateFlow()
+
+    private var lyricsJob: Job? = null
+
+    fun toggleLyrics() {
+        val show = !_lyrics.value.visible
+        _lyrics.update { it.copy(visible = show) }
+        if (show) startLyrics() else stopLyrics()
+    }
+
+    /** Retries after a failure, or fetches for the current track if idle. */
+    fun reloadLyrics() {
+        if (!_lyrics.value.visible) return
+        startLyrics(force = true)
+    }
+
+    private fun stopLyrics() {
+        lyricsJob?.cancel()
+        lyricsJob = null
+    }
+
+    private fun startLyrics(force: Boolean = false) {
+        lyricsJob?.cancel()
+        val currentId = _lyrics.value.trackId
+        lyricsJob = viewModelScope.launch {
+            // One ticker for the highlight, and one collector for track changes:
+            // skipping to the next song has to load its lyrics without the user
+            // touching the panel.
+            launch {
+                while (isActive) {
+                    _lyricsPositionMs.value = playerController.livePositionMs()
+                    delay(LYRICS_TICK_MS)
+                }
+            }
+            playback.map { it.current?.trackId }.distinctUntilChanged().collect { trackId ->
+                if (trackId != null && trackId == currentId && !force && _lyrics.value.result != null) {
+                    // Same track and we already have an answer; nothing to do.
+                    return@collect
+                }
+                loadLyrics(trackId)
+            }
+        }
+    }
+
+    private suspend fun loadLyrics(trackId: String?) {
+        if (trackId.isNullOrBlank()) {
+            _lyrics.update { it.copy(trackId = null, loading = false, result = null) }
+            return
+        }
+        _lyrics.update { it.copy(trackId = trackId, loading = true, result = null) }
+
+        val item = playback.value.queue.firstOrNull { it.trackId == trackId }
+            ?: playback.value.current?.takeIf { it.trackId == trackId }
+
+        val result = lyricsRepository.lyricsFor(
+            trackId = trackId,
+            artist = item?.artist.orEmpty(),
+            title = item?.title.orEmpty(),
+            album = item?.albumTitle,
+            durationSeconds = item?.durationSeconds ?: 0,
+        )
+        android.util.Log.i("QbdlxLyrics", "track $trackId -> $result")
+
+        // A slow lookup that lands after the user moved on must not overwrite
+        // the lyrics for the track that is playing now.
+        _lyrics.update { current ->
+            if (current.trackId == trackId) current.copy(loading = false, result = result) else current
+        }
+    }
+
+    private fun clearLyrics() {
+        _lyrics.value = LyricsUi(visible = _lyrics.value.visible)
+    }
+
     // ------------------------------------------------------------- playback
 
     private val playerController by lazy { AppGraph.player(app) }
@@ -576,7 +680,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun previousTrack() = playerController.previous()
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
     fun seekToQueueIndex(index: Int) = playerController.seekToIndex(index)
-    fun stopPlayback() = playerController.stop()
+    fun stopPlayback() {
+        playerController.stop()
+        clearLyrics()
+    }
     fun clearPlaybackError() = playerController.clearError()
 
     fun toggleShuffle() = playerController.toggleShuffle()
@@ -608,6 +715,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setAlbumTemplate(v: String) = settings.setAlbumTemplate(v)
     fun setTrackTemplate(v: String) = settings.setTrackTemplate(v)
     fun setSaveCover(v: Boolean) = settings.setSaveCoverToFolder(v)
+    fun setSaveLyricsFile(v: Boolean) = settings.setSaveLyricsFile(v)
     fun setConcurrency(v: Int) = settings.setConcurrency(v)
     fun setArtworkSize(size: ArtworkUrls.Size) = settings.setArtworkSize(size)
 

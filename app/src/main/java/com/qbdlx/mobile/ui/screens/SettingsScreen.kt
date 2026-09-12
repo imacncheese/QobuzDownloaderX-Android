@@ -368,6 +368,21 @@ fun SettingsScreen(vm: AppViewModel) {
                 checked = settings.tag.writeCoverArt,
                 onChange = { vm.setTagOption("tag_cover", it) },
             )
+            SwitchRow(
+                label = stringResource(R.string.settings_embed_lyrics),
+                checked = settings.tag.writeLyrics,
+                onChange = { vm.setTagOption("tag_lyrics", it) },
+            )
+            SwitchRow(
+                label = stringResource(R.string.settings_lyrics_file),
+                checked = settings.saveLyricsFile,
+                onChange = vm::setSaveLyricsFile,
+            )
+            Text(
+                text = stringResource(R.string.settings_lyrics_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.settings_art_size),

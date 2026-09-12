@@ -3,11 +3,18 @@ package com.qbdlx.mobile.download
 import android.util.Log
 import com.qbdlx.mobile.api.Album
 import com.qbdlx.mobile.api.Track
+import com.qbdlx.mobile.lyrics.LyricLine
+import com.qbdlx.mobile.lyrics.Lyrics
 import org.jaudiotagger.audio.AudioFileIO
 import org.jaudiotagger.tag.FieldKey
 import org.jaudiotagger.tag.Tag
 import org.jaudiotagger.tag.TagField
+import org.jaudiotagger.tag.id3.AbstractID3v2Frame
 import org.jaudiotagger.tag.id3.AbstractID3v2Tag
+import org.jaudiotagger.tag.id3.ID3v23Frame
+import org.jaudiotagger.tag.id3.ID3v24Frame
+import org.jaudiotagger.tag.id3.ID3v24Tag
+import org.jaudiotagger.tag.id3.framebody.FrameBodySYLT
 import org.jaudiotagger.tag.images.StandardArtwork
 import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTag
 import java.io.File
@@ -49,6 +56,7 @@ object MetadataTagger {
         val writeReleaseDate: Boolean = true,
         val writeYear: Boolean = true,
         val writeCoverArt: Boolean = true,
+        val writeLyrics: Boolean = true,
         val writeComment: Boolean = false,
         val commentText: String = "",
         val writeReplayGain: Boolean = true,
@@ -77,6 +85,9 @@ object MetadataTagger {
      * — see [withAudioExtension].
      *
      * @param coverArt JPEG/PNG bytes for the front cover, or null to skip
+     * @param lyrics   lyrics to embed, or null when none were found. Timed lines
+     *                 are written in the format's own synchronised-lyrics frame;
+     *                 see [writeLyrics]
      */
     fun tag(
         file: File,
@@ -85,6 +96,7 @@ object MetadataTagger {
         coverArt: ByteArray?,
         options: Options,
         workingCopy: File,
+        lyrics: Lyrics? = null,
     ): Result {
         if (album == null && track == null) {
             return Result(ok = false, warning = "No metadata available for this track")
@@ -187,6 +199,16 @@ object MetadataTagger {
             }
 
             var warning: String? = null
+
+            if (options.writeLyrics && lyrics != null && !lyrics.isEmpty) {
+                // The unsynchronised block is the one every player reads, so it
+                // always goes in. The timing is a separate, format-specific
+                // frame on top of it.
+                put(FieldKey.LYRICS, lyrics.plainText)
+                if (lyrics.hasSynced) {
+                    warning = embedSyncedLyrics(tag, lyrics)
+                }
+            }
 
             if (options.writeCoverArt && coverArt != null && coverArt.isNotEmpty()) {
                 if (isFlac(target)) {
@@ -311,6 +333,80 @@ object MetadataTagger {
      * frame-id based variant is used as a fallback. Anything a given format does
      * not support is skipped silently.
      */
+    /**
+     * Writes the timed lyrics in whatever form the container understands, and
+     * returns a warning when it has to give up.
+     *
+     * FLAC has no synchronised-lyrics concept, so the LRC text goes into a
+     * `SYNCEDLYRICS` Vorbis comment, which is what other taggers and players in
+     * that ecosystem use. MP3 gets a real `SYLT` frame, built by hand because
+     * JAudioTagger exposes the frame body but no `FieldKey` for it.
+     */
+    private fun embedSyncedLyrics(tag: Tag, lyrics: Lyrics): String? {
+        val lrc = lyrics.toLrc()
+
+        if (tag is AbstractID3v2Tag) {
+            return runCatching { embedSylt(tag, lyrics.synced) }
+                .fold(
+                    onSuccess = { null },
+                    onFailure = { e ->
+                        Log.w(TAG, "Synced lyrics skipped", e)
+                        // The unsynced block is already written, so this is a
+                        // partial miss rather than a lost download.
+                        "Timed lyrics skipped (${e.javaClass.simpleName})"
+                    },
+                )
+        }
+
+        putCustom(tag, "SYNCEDLYRICS", "TXXX:SYNCEDLYRICS", lrc)
+        return null
+    }
+
+    /**
+     * Adds a `SYLT` frame.
+     *
+     * Two things here are not obvious and both were established by running code
+     * against JAudioTagger 2.2.5 rather than by reading its documentation:
+     *
+     *  - There is no `ID3v24Frame(FrameBodySYLT)` constructor, and the
+     *    `ID3v24Frame(AbstractID3v2Frame)` copy constructor NPEs for anything
+     *    that is not ID3v2.2 or v2.3 because it never copies the body. The frame
+     *    is therefore created empty and given a body afterwards.
+     *  - [FrameBodySYLT]'s two ints are `timeStampFormat` then `contentType`, in
+     *    that order, which is the opposite of the intuitive reading. 2 means
+     *    milliseconds and 1 means "this is the lyrics".
+     *
+     * A freshly tagged MP3 gets an ID3v2.3 tag, so the frame class has to follow
+     * the tag's version. Adding a v2.4 frame to a v2.3 tag silently produces a
+     * file no reader can parse.
+     */
+    private fun embedSylt(tag: AbstractID3v2Tag, lines: List<LyricLine>) {
+        val body = FrameBodySYLT(3, "eng", 2, 1, "Lyrics", syltPayload(lines))
+        val frame: AbstractID3v2Frame =
+            if (tag is ID3v24Tag) ID3v24Frame("SYLT") else ID3v23Frame("SYLT")
+        frame.setBody(body)
+
+        tag.deleteField("SYLT")
+        // addFrame is protected; addField(TagField) is the public equivalent and
+        // routes the frame into the tag's frame map for both versions.
+        tag.addField(frame)
+    }
+
+    /** Timestamp, text, terminator, repeated. Timestamps are big-endian ms. */
+    internal fun syltPayload(lines: List<LyricLine>): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        for (line in lines) {
+            val ms = line.timeMs.coerceAtLeast(0L)
+            out.write(((ms shr 24) and 0xFF).toInt())
+            out.write(((ms shr 16) and 0xFF).toInt())
+            out.write(((ms shr 8) and 0xFF).toInt())
+            out.write((ms and 0xFF).toInt())
+            out.write(line.text.toByteArray(Charsets.UTF_8))
+            out.write(0)
+        }
+        return out.toByteArray()
+    }
+
     private fun putCustom(tag: Tag, vorbisId: String, id3Id: String, value: String?) {
         val v = value?.trim().orEmpty()
         if (v.isEmpty()) return

@@ -173,6 +173,16 @@ class PlayerController(
         controller?.seekTo(positionMs.coerceAtLeast(0L))
     }
 
+    /**
+     * The playback position right now.
+     *
+     * [PlaybackState.positionMs] only moves when the player reports an event, so
+     * it is far too coarse to follow a lyric line. The lyrics view polls this
+     * instead, which keeps the extra wake-ups out of the shared state flow that
+     * the rest of the UI recomposes on.
+     */
+    fun livePositionMs(): Long = controller?.currentPosition?.coerceAtLeast(0L) ?: 0L
+
     fun seekToIndex(index: Int) {
         val c = controller ?: return
         c.seekTo(index, 0L)

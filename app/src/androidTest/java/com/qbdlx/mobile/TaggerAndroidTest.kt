@@ -47,6 +47,15 @@ class TaggerAndroidTest {
     private fun jpegFixture(): ByteArray =
         testContext.assets.open("cover.jpg").use { it.readBytes() }
 
+    private fun mp3Fixture(): File {
+        val dest = File(context.cacheDir, "silence.mp3")
+        testContext.assets.open("silence.mp3").use { input ->
+            dest.outputStream().use { input.copyTo(it) }
+        }
+        assertTrue("mp3 fixture must be non-empty", dest.length() > 0)
+        return dest
+    }
+
     @Test
     fun canReadAFlacAtAll() {
         val flac = flacFixture()
@@ -307,6 +316,137 @@ class TaggerAndroidTest {
         val data: ByteArray,
     )
 
+    // ------------------------------------------------------------- lyrics
+
+    private val lyricsFixture = com.qbdlx.mobile.lyrics.Lyrics(
+        synced = listOf(
+            com.qbdlx.mobile.lyrics.LyricLine(1_000, "First line"),
+            com.qbdlx.mobile.lyrics.LyricLine(5_000, "Second line"),
+            com.qbdlx.mobile.lyrics.LyricLine(12_500, "Third line"),
+        ),
+        plain = "First line\nSecond line\nThird line",
+    )
+
+    /**
+     * MP3 lyrics go into ID3 frames, and the frame class has to match the tag's
+     * ID3 version: a fresh MP3 gets an ID3v2.3 tag from JAudioTagger, and a v2.4
+     * frame added to a v2.3 tag produces a file no reader can parse. That is
+     * device-only knowledge, because on Windows JAudioTagger cannot grow an ID3
+     * tag at all.
+     */
+    @Test
+    fun mp3LyricsAreEmbeddedOnAndroid() {
+        val work = File(context.cacheDir, "lyrics.mp3")
+        mp3Fixture().copyTo(work, overwrite = true)
+
+        val result = MetadataTagger.tag(
+            file = work,
+            album = null,
+            track = com.qbdlx.mobile.api.Track(
+                id = kotlinx.serialization.json.JsonPrimitive("t1"),
+                title = "Lyrics Track",
+            ),
+            coverArt = null,
+            options = MetadataTagger.Options(writeLyrics = true, writeCoverArt = false),
+            workingCopy = File(context.cacheDir, "lyrics-work.mp3"),
+            lyrics = lyricsFixture,
+        )
+        assertTrue("tagging must succeed: ${result.warning}", result.ok)
+        val written = result.file!!
+
+        val tag = AudioFileIO.read(written).tag
+        android.util.Log.i(
+            "TaggerAndroidTest",
+            "mp3 tag version=${tag.javaClass.simpleName} uslt=${tag.getFirst(FieldKey.LYRICS)}",
+        )
+
+        // The unsynchronised block is what every player reads.
+        val uslt = tag.getFirst(FieldKey.LYRICS)
+        assertNotNull("USLT must be written", uslt)
+        assertTrue("USLT must carry the text: $uslt", uslt!!.contains("Second line"))
+
+        // And the timed frame has to round-trip with its timestamps intact.
+        val sylt = readSylt(tag)
+        assertNotNull("a SYLT frame must be present", sylt)
+        assertEquals(3, sylt!!.size)
+        assertEquals(1_000L, sylt[0].first)
+        assertEquals("First line", sylt[0].second)
+        assertEquals(5_000L, sylt[1].first)
+        assertEquals("Second line", sylt[1].second)
+        assertEquals(12_500L, sylt[2].first)
+        assertEquals("Third line", sylt[2].second)
+    }
+
+    @Test
+    fun flacLyricsAreEmbeddedOnAndroid() {
+        val work = File(context.cacheDir, "lyrics.flac")
+        flacFixture().copyTo(work, overwrite = true)
+
+        val result = MetadataTagger.tag(
+            file = work,
+            album = null,
+            track = com.qbdlx.mobile.api.Track(
+                id = kotlinx.serialization.json.JsonPrimitive("t1"),
+                title = "Lyrics Track",
+            ),
+            coverArt = null,
+            options = MetadataTagger.Options(writeLyrics = true, writeCoverArt = false),
+            workingCopy = File(context.cacheDir, "lyrics-work.flac"),
+            lyrics = lyricsFixture,
+        )
+        assertTrue("tagging must succeed: ${result.warning}", result.ok)
+        val written = result.file!!
+
+        val tag = AudioFileIO.read(written).tag
+        val plain = tag.getFirst(FieldKey.LYRICS)
+        assertNotNull("LYRICS must be written", plain)
+        assertTrue("LYRICS must carry the text: $plain", plain!!.contains("Second line"))
+
+        // FLAC keeps the timing in a SYNCEDLYRICS comment. FieldKey has no entry
+        // for it, so it is looked up by its raw comment name, which is also what
+        // another player would do.
+        val flac = tag as org.jaudiotagger.tag.flac.FlacTag
+        val value = flac.getFirst("SYNCEDLYRICS")
+        android.util.Log.i("TaggerAndroidTest", "SYNCEDLYRICS=$value")
+
+        assertNotNull("SYNCEDLYRICS must be present", value)
+        assertTrue("must start with the first stamp: $value", value!!.startsWith("[00:01.00]"))
+        assertTrue("must keep the last stamp: $value", value.contains("[00:12.50]"))
+        assertTrue("must keep the text: $value", value.contains("Third line"))
+    }
+
+    /**
+     * Decodes the SYLT payload back the way a player would.
+     *
+     * Deliberately not using JAudioTagger's own reader for the assertion: the
+     * point is to prove the bytes on disk are right, not that the library can
+     * read back what it wrote.
+     */
+    private fun readSylt(tag: org.jaudiotagger.tag.Tag): List<Pair<Long, String>>? {
+        val frames = tag.getFields("SYLT")
+        if (frames.isEmpty()) return null
+        val frame = frames.first() as org.jaudiotagger.tag.id3.AbstractID3v2Frame
+        val body = frame.body as? org.jaudiotagger.tag.id3.framebody.FrameBodySYLT ?: return null
+        assertEquals("time stamp format must be milliseconds", 2, body.timeStampFormat)
+        assertEquals("content type must be lyrics", 1, body.contentType)
+        assertEquals("eng", body.language)
+
+        val raw = body.lyrics
+        val out = ArrayList<Pair<Long, String>>()
+        var p = 0
+        while (p + 5 <= raw.size) {
+            var ms = 0L
+            for (i in 0 until 4) {
+                ms = (ms shl 8) or (raw[p + i].toLong() and 0xFF)
+            }
+            p += 4
+            val start = p
+            while (p < raw.size && raw[p] != 0.toByte()) p++
+            out.add(ms to String(raw, start, p - start, Charsets.UTF_8))
+            p++ // the NUL terminator
+        }
+        return out
+    }
     /**
      * Minimal FLAC metadata walk that extracts the PICTURE block, mirroring what
      * a media player does. Implemented here so the assertion does not depend on

@@ -5,6 +5,9 @@ import android.net.Uri
 import android.util.Log
 import com.qbdlx.mobile.api.QobuzApiException
 import com.qbdlx.mobile.api.QobuzClient
+import com.qbdlx.mobile.lyrics.Lyrics
+import com.qbdlx.mobile.lyrics.LyricsRepository
+import com.qbdlx.mobile.lyrics.LyricsResult
 import com.qbdlx.mobile.settings.SettingsStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +35,7 @@ class DownloadEngine(
     private val client: QobuzClient,
     private val settings: SettingsStore,
     private val storage: StorageManager,
+    private val lyrics: LyricsRepository,
 ) {
 
     private val http: OkHttpClient = OkHttpClient.Builder()
@@ -87,6 +91,19 @@ class DownloadEngine(
                 null
             }
 
+            // Lyrics are fetched once and used twice: embedded in the file and,
+            // if asked for, written out as a sidecar .lrc.
+            val lyrics = if (config.tag.writeLyrics || config.saveLyricsFile) {
+                fetchLyrics(item).also {
+                    Log.i(
+                        TAG,
+                        "[${item.id}] lyrics: ${it?.let { l -> "${l.synced.size} timed lines" } ?: "none"}",
+                    )
+                }
+            } else {
+                null
+            }
+
             // Tagging is best-effort and must never cost the user the download.
             // If it fails we still publish the untouched audio, because the
             // bytes on disk are the valuable part and tags can be redone later.
@@ -102,6 +119,7 @@ class DownloadEngine(
                         coverArt = coverBytes.takeIf { config.tag.writeCoverArt },
                         options = config.tag,
                         workingCopy = taggedFile,
+                        lyrics = lyrics.takeIf { config.tag.writeLyrics },
                     )
                 }
                 tagWarning = tagResult.warning
@@ -147,6 +165,22 @@ class DownloadEngine(
                 }
             }
 
+            // Sidecar lyrics. Written as LRC when the source was timed, so
+            // players that read a .lrc next to the audio get the sync too.
+            if (config.saveLyricsFile && lyrics != null) {
+                val body = if (lyrics.hasSynced) lyrics.toLrc() else lyrics.plainText
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        storage.publishRaw(
+                            target = resolveTarget(config, relativeDir),
+                            fileName = fileName.substringBeforeLast('.') + ".lrc",
+                            mimeType = RenameTemplates.mimeFor("lrc"),
+                            bytes = body.toByteArray(Charsets.UTF_8),
+                        )
+                    }.onFailure { Log.w(TAG, "[${item.id}] could not write the .lrc sidecar", it) }
+                }
+            }
+
             DownloadQueue.update(item.id) {
                 it.copy(
                     status = DownloadStatus.COMPLETED,
@@ -184,7 +218,7 @@ class DownloadEngine(
             writeGenre || writeIsrc || writeUrl || writeReleaseType || writeExplicit ||
             writeTrackTitle || writeTrackNumber || writeTrackTotal || writeUpc ||
             writeReleaseDate || writeYear || writeComment || writeReplayGain ||
-            writeCoverArt
+            writeCoverArt || writeLyrics
     }
 
     /**
@@ -354,6 +388,34 @@ class DownloadEngine(
                 "[${item.id}] no usable cover art across ${ordered.size} candidate URLs",
             )
             null
+        }
+    }
+
+    /**
+     * Looks up lyrics for a queued item.
+     *
+     * Best effort by design: a lyrics outage must never cost a download, so any
+     * failure is logged and treated as "no lyrics".
+     */
+    private suspend fun fetchLyrics(item: DownloadItem): Lyrics? {
+        val title = item.track?.title ?: item.title
+        if (title.isBlank()) return null
+        return when (
+            val result = lyrics.lyricsFor(
+                trackId = item.trackId,
+                artist = item.track?.artist?.name ?: item.artist,
+                title = title,
+                album = item.album?.title ?: item.albumTitle,
+                durationSeconds = item.durationSeconds,
+            )
+        ) {
+            is LyricsResult.Found -> result.lyrics
+            LyricsResult.Instrumental -> null
+            LyricsResult.NotFound -> null
+            is LyricsResult.Error -> {
+                Log.w(TAG, "[${item.id}] lyrics unavailable: ${result.message}")
+                null
+            }
         }
     }
 

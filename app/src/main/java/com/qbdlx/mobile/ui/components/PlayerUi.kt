@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -46,9 +47,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.qbdlx.mobile.lyrics.LyricsUi
 import com.qbdlx.mobile.playback.PlaybackState
 import com.qbdlx.mobile.ui.formatDuration
 import com.qbdlx.mobile.ui.theme.LocalShapes
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Persistent mini player shown above the bottom navigation.
@@ -194,6 +197,8 @@ fun MiniPlayerBar(
 @Composable
 fun FullPlayer(
     state: PlaybackState,
+    lyrics: LyricsUi,
+    lyricsPositionMs: StateFlow<Long>,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -202,6 +207,8 @@ fun FullPlayer(
     onCycleRepeat: () -> Unit,
     onOpenQueue: () -> Unit,
     onDownload: () -> Unit,
+    onToggleLyrics: () -> Unit,
+    onReloadLyrics: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val item = state.current
@@ -242,16 +249,29 @@ fun FullPlayer(
 
             Spacer(Modifier.height(24.dp))
 
+            // The lyrics panel takes over the artwork's slot rather than pushing
+            // it out of the way, so toggling it does not move the transport
+            // controls out from under the user's thumb.
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.86f)
                     .aspectRatio(1f),
             ) {
-                FilledCoverArt(
-                    url = item?.artworkUrl,
-                    shape = shapes.artworkLarge,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                if (lyrics.visible) {
+                    LyricsPanel(
+                        state = lyrics,
+                        positionMs = lyricsPositionMs,
+                        onSeek = onSeek,
+                        onRetry = onReloadLyrics,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    FilledCoverArt(
+                        url = item?.artworkUrl,
+                        shape = shapes.artworkLarge,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
 
             Spacer(Modifier.height(32.dp))
@@ -390,6 +410,17 @@ fun FullPlayer(
                         Icons.AutoMirrored.Filled.QueueMusic,
                         contentDescription = "Queue",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onToggleLyrics, enabled = item != null) {
+                    Icon(
+                        imageVector = Icons.Filled.Lyrics,
+                        contentDescription = if (lyrics.visible) "Hide lyrics" else "Show lyrics",
+                        tint = if (lyrics.visible) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
                 IconButton(onClick = onDownload, enabled = item != null) {

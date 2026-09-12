@@ -90,6 +90,9 @@
     <string name="settings_tags">Metadata tags</string>
     <string name="settings_cover_file">Save Cover.jpg next to the tracks</string>
     <string name="settings_embed_cover">Embed cover art in each file</string>
+    <string name="settings_embed_lyrics">Embed lyrics in each file</string>
+    <string name="settings_lyrics_file">Also save a .lrc file next to the track</string>
+    <string name="settings_lyrics_hint">Lyrics come from LRCLIB. Timed lyrics are written in each format\'s own synchronised field, so other players can follow along.</string>
     <string name="settings_art_size">Embedded artwork size</string>
     <string name="settings_art_size_hint">The embedded cover is written into the file permanently, so the largest available rendition is used by default. Lower sizes make files smaller.</string>
     <string name="settings_concurrency">Simultaneous downloads</string>

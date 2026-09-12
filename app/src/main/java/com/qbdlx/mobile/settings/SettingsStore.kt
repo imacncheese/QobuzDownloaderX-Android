@@ -140,6 +140,7 @@ class SettingsStore(context: Context) {
             writeReleaseDate = prefs.getBoolean("tag_release_date", true),
             writeYear = prefs.getBoolean("tag_year", true),
             writeCoverArt = prefs.getBoolean("tag_cover", true),
+            writeLyrics = prefs.getBoolean("tag_lyrics", true),
             writeComment = prefs.getBoolean("tag_comment", false),
             commentText = prefs.getString("tag_comment_text", "") ?: "",
             writeReplayGain = prefs.getBoolean("tag_replaygain", true),

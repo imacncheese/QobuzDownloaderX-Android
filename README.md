@@ -30,10 +30,10 @@ What came from the desktop app and its `Qo(penAPI)` library:
 
 Sign in with an email and password or an auth token, search albums/tracks/artists/playlists, open
 an album or playlist, play or download it. Downloads go up to 24-bit FLAC if your account allows
-it, with cover art and tags written into the files. There's a background player with lock screen
-controls, four colour themes, and a corner rounding slider.
+it, with cover art, tags and lyrics written into the files. There's a background player with lock
+screen controls, synced lyrics, four colour themes, and a corner rounding slider.
 
-Tested by me on a Pixel 8 running Android 17. 98 unit tests and 5 on-device tests.
+Tested by me on a Pixel 8 running Android 17. 162 unit tests and 11 on-device tests.
 
 I have no Qobuz account, so I've never run an authenticated download or heard the player play
 anything. Both are built and tested as far as I can without one. The parts I could verify on-device
@@ -228,9 +228,27 @@ the brand purple and artwork colours stay as intended.
 ## Not done yet
 
 - Favourite albums and artists. Only favourite tracks.
-- Lyrics. The old mobile app had an LRCLib plugin, this doesn't.
 - Playback quality uses the download quality setting rather than having its own.
 - No gapless playback or queue reordering.
+
+## Lyrics
+
+Lyrics come from [LRCLIB](https://lrclib.net), a free community database with no account and no
+API key. Qobuz does not expose lyrics anywhere in its own API, so there was no first-party source
+to use.
+
+The lookup is deliberately strict about which record it accepts. Timed lyrics are worth much more
+than a plain block, so a timed match wins, but a candidate whose length is more than a few seconds
+off is rejected outright even when it is the only one. The search is already scoped by artist and
+title, so a large length difference means a live take, an extended mix or a different song with the
+same name, and lyrics for the wrong recording are worse than no lyrics.
+
+If the service has nothing, is rate limiting, or is simply down, the app says so in the player and
+writes your download without lyrics. A lyrics lookup can never cost you a file.
+
+By default the timing goes into the file itself: `LYRICS` and `SYNCEDLYRICS` comments for FLAC, a
+`USLT` frame plus a `SYLT` frame for MP3. There is also an option to write a `.lrc` next to each
+track for players that look for one.
 
 ## Legal
 
