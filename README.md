@@ -1,159 +1,101 @@
 # QobuzDLX for Android
 
-An Android client for downloading music from Qobuz, ported from the **QobuzDownloaderX (QBDLX)**
-desktop application by [ImAiiR](https://github.com/ImAiiR/QobuzDownloaderX).
+An Android app for downloading music from Qobuz. It's a port of the
+[QobuzDownloaderX](https://github.com/ImAiiR/QobuzDownloaderX) desktop app, which is C# and
+still maintained.
 
-## Why this exists
+## Why it exists
 
-[`JemPH/QobuzDownloaderX-Mobile`](https://github.com/JemPH/QobuzDownloaderX-Mobile) is **closed
-source and archived**. Its repository contains only a `README.md` and two PNG files — there is no
-application code in it, and never was; the project shipped prebuilt APKs as release assets and
-nothing else. The last release is `0.5.0` (June 2025).
+The old mobile app, [JemPH/QobuzDownloaderX-Mobile](https://github.com/JemPH/QobuzDownloaderX-Mobile),
+is archived and its repo never had any source in it. Just a README, two images, and prebuilt APKs
+on the releases page. So there's nothing to patch. If it breaks, it stays broken.
 
-That means the older app cannot be "fixed": there is no source to patch, and the APKs are stale.
-This project is a clean reimplementation on top of the still-maintained C# desktop app, whose API
-logic is the only working reference.
+That's why this exists. I ported the working desktop app's logic to Kotlin so there's something
+I can actually fix.
 
-**What was ported from the desktop app:**
+What came from the desktop app and its `Qo(penAPI)` library:
 
-| Area | Source in `QobuzDownloaderX` |
+| Area | Source |
 |---|---|
-| API endpoints, auth flow | `Qo(penAPI).cs` (`ImAiiR/Qo-penAPI-`) |
-| `app_id` / `app_secret` discovery | `Service.GetAppID` / `Service.GetAppSecret` |
+| API endpoints, auth | `Qo(penAPI).cs` |
+| `app_id` / `app_secret` discovery | `Service.GetAppID`, `Service.GetAppSecret` |
 | `track/getFileUrl` signing | `Service.TrackGetFileUrl` |
-| Quality presets (`format_id`) | `qbdlxForm.flacHighButton2_CheckedChanged` et al. |
+| Quality presets (`format_id`) | `qbdlxForm` quality buttons |
 | Naming templates | `Helpers/RenameTemplates.cs` |
-| Tag field mapping | `Helpers/TagFile.cs` |
+| Tag fields | `Helpers/TagFile.cs` |
 | Download strategy | `Helpers/Download/DownloadFile.cs` |
-| Pagination loops | `Helpers/GetInfo.cs` |
+| Pagination | `Helpers/GetInfo.cs` |
 
-## Status
+## What works
 
-Verified working:
+Sign in with an email and password or an auth token, search albums/tracks/artists/playlists, open
+an album or playlist, play or download it. Downloads go up to 24-bit FLAC if your account allows
+it, with cover art and tags written into the files. There's a background player with lock screen
+controls, four colour themes, and a corner rounding slider.
 
-- Builds clean (debug + R8-minified release) with `assembleRelease`.
-- Installs and launches on a **Pixel 8, Android 17 (API 37), arm64-v8a** with no exceptions.
-- Retrieves a live `app_id` + `app_secret` pair from the current Qobuz web-player bundle
-  (`8.2.0-b034`) at startup.
-- 59 JVM unit tests + 5 on-device instrumented tests, all passing. The on-device suite
-  deliberately exercises the paths that behave differently on Android (see below), including
-  tagging a file named the way the download engine actually names it.
+Tested by me on a Pixel 8 running Android 17. 98 unit tests and 5 on-device tests.
 
-**Not yet verified by the author:** an actual authenticated download, because that needs a real
-Qobuz account. See *Testing* below.
+I have no Qobuz account, so I've never run an authenticated download or heard the player play
+anything. Both are built and tested as far as I can without one. The parts I could verify on-device
+are verified; the rest is on you to try.
 
-## Android-specific traps this project works around
+## Things that bit me, in case you hit them too
 
-These are the reason the on-device test suite exists: each one passes on the JVM and fails on a
-phone, which is exactly how a broken build can look healthy.
+Most of these pass on the JVM and fail on a phone, which is how a broken build looks fine. That's
+why the on-device test suite exists.
 
-### 0. JAudioTagger dispatches readers on the file *extension*
+**JAudioTagger picks its reader from the file extension.** The downloader streams to
+`qbdlx_<id>.part` and the tagger's working copy was `qbdlx_<id>.tagged`, so JAudioTagger threw
+`CannotReadException: No Reader associated with this extension: tagged` and skipped tagging. Every
+download saved fine, just with no tags. The working copy now gets the real extension, sniffed from
+the magic bytes.
 
-This shipped broken in 1.0.0 and is the subtlest of the lot. The download engine streams audio to
-`qbdlx_<id>.part`, and the tagger's working copy was `qbdlx_<id>.tagged`. JAudioTagger picks its
-reader from the file name, so it threw:
+**FLAC cover art can't use JAudioTagger on Android.** `FlacTag.createField` decodes the image
+through `javax.imageio.ImageIO` and `java.awt.image.BufferedImage`, and Android has neither. It
+failed with `NoClassDefFoundError: Failed resolution of: Ljavax/imageio/ImageIO`. `FlacPicture`
+writes the FLAC PICTURE block directly instead, no AWT involved. MP3 still goes through
+JAudioTagger since its ID3 path doesn't need AWT.
 
-```
-CannotReadException: No Reader associated with this extension: tagged
-```
+**Tagging used to be able to lose a download.** It ran before the file was published, so any
+tagger exception meant you got nothing at all. Now it runs on a copy and is best-effort: if it
+fails, or the file shrinks by more than half, the untouched original is published and you get a
+warning.
 
-Tagging was skipped, the warning was swallowed into a hint, and the **untagged** file was published
-correctly — so downloads "worked" but had no metadata. `MetadataTagger.withAudioExtension` now
-sniffs the container from magic bytes (`fLaC`, `ID3`/frame-sync, `ftyp`, `OggS`, `RIFF`) and gives
-the working copy the real extension, and `Result.file` reports the path actually written so the
-engine publishes the tagged file rather than guessing its name.
+**Artist names come from a role string, not a name field.** Qobuz sends credits like
+`"Radiohead, MainArtist - Nigel Godrich, Producer - ..."`. Splitting that on commas puts producers
+and engineers in the ARTIST tag. `PerformersParser` is a port of the desktop app's version and
+only keeps entries whose roles are main or featured artist.
 
-*Symptom if this regresses:* files download fine but every one is untagged.
+**Two download workers can grab the same track.** `DownloadQueue.claimNext()` marks an item started
+under one lock, so the read and the claim can't interleave.
 
-### 1. FLAC cover art cannot use JAudioTagger on Android
+**A slash in metadata creates directories.** Templates are sanitised before being split on `/`, so
+a track actually titled `Bad/Name` can't add a folder level.
 
-`FlacTag.createField` decodes artwork through `javax.imageio.ImageIO` and
-`java.awt.image.BufferedImage`. **Android ships neither.** On a device the call fails with:
+## Where the credentials come from
 
-```
-NoClassDefFoundError: Failed resolution of: Ljavax/imageio/ImageIO;
-```
+Qobuz doesn't publish API credentials. The desktop app scrapes them from the web player and so does
+this: fetch `https://play.qobuz.com/login`, find `/resources/<version>/bundle.js`, read the pair
+out of it, then log in with `user/login` using an email and password or an existing token.
 
-`FlacPicture` therefore writes the FLAC `PICTURE` metadata block directly, which needs no AWT. It
-rebuilds the metadata chain, removes any previous picture block, appends the new one as the single
-final block, and re-reads the chain to confirm exactly one block carries the last-metadata flag.
-MP3 still goes through JAudioTagger, whose ID3 artwork path does not touch AWT.
-
-*Symptom if this regresses:* downloads complete but every file is missing cover art.
-
-### 2. Tagging must never be able to lose a download
-
-Tagging runs on a working copy and is treated as best-effort. If it fails or damages the file, the
-**untouched original is published instead** and the user sees a warning. The output is also
-rejected if it shrinks by more than half, which catches a tagger that truncated the stream.
-
-*Symptom if this regresses:* the file downloads, then vanishes — nothing is saved at all.
-
-### 5. Artist names must be parsed from roles, not joined
-
-Qobuz reports credits in a role-annotated `performers` string:
-
-```
-"Radiohead, MainArtist - Nigel Godrich, Producer - Thom Yorke, AssociatedPerformer, Vocals"
-```
-
-Putting that string (or a naive comma-split of it) into the ARTIST tag is wrong — it drags
-producers, engineers and mixers into the artist field. `PerformersParser` ports the desktop app's
-`PerformersParser.cs` and `InvolvedPersonRoleMapping.cs`: only entries whose roles mark them as a
-main artist or a featured artist are used, the two groups are merged, and featured artists are
-dropped when the track title already advertises the feature.
-
-Album artists come from `album.artists[].roles` (normally `["main-artist"]`), falling back to the
-plain `album.artist` field. Some track titles genuinely wrap mid-name; a single newline is treated
-as a line wrap while a blank line separates entries.
-
-*Symptom if this regresses:* artist tags contain engineer/producer names or the whole credits blob.
-
-### 6. Concurrent workers must claim work atomically
-
-`DownloadQueue.claimNext()` takes a queued item and marks it started under a single lock. A plain
-read-then-start lets two workers pick the same track and download it twice.
-
-*Symptom if this regresses:* duplicated downloads at `concurrency > 1`.
-
-### 4. A `/` in metadata must not create directories
-
-Naming templates are sanitised *before* being split on `/`, so a track genuinely titled
-`Bad/Name` cannot inject extra directory levels into the output path.
-
-
-## Credentials
-
-Qobuz does not publish API credentials. The desktop app scrapes them from the Qobuz web player,
-and so does this one:
-
-1. Fetch `https://play.qobuz.com/login`, locate `/resources/<version>/bundle.js`.
-2. Read the credentials out of the bundle.
-3. Log in (`user/login`) with e-mail + password, or an existing `user_auth_token`.
-
-### A note on the `app_secret`
-
-The historical technique (used by `Qo(penAPI)`) reconstructs the secret from the bundle's timezone
-table: concatenate `seed + info + extras`, drop the last 44 characters, base64-decode.
-
-**As of bundle 8.x that technique is outdated.** The bundle now ships the pair in the clear:
+The app secret is the fiddly part. The older method, from `Qo(penAPI)`, rebuilds it from the
+bundle's timezone table: concatenate `seed + info + extras`, drop the last 44 characters, base64
+decode. As of bundle 8.x that's outdated. The bundle now has the pair sitting in plaintext:
 
 ```js
 production:{api:{appId:"<9-digit id>",appSecret:"<32 hex chars>",…
 ```
 
-`QobuzCredentials` prefers that direct value and only falls back to the timezone de-obfuscation if
-it is absent. This matters because the two techniques currently return **different** strings, and
-the plaintext one is the pair Qobuz actually publishes.
+`QobuzCredentials` uses that and only falls back to the timezone trick if it's missing. Worth
+knowing because the two methods currently return different strings.
 
-If discovery ever fails, the login screen's **Advanced** section accepts a manually supplied
-`app_id` / `app_secret` pair.
+If discovery fails, the login screen's Advanced section takes a manually entered pair.
 
-### Credential guard
+The extracted pair is a live credential for Qobuz's own web player. It's read on your device at
+runtime and isn't in this repo. Don't paste your own into a README, a test, or an issue.
 
-`scripts/check-secrets.ps1` scans every tracked file for GitHub tokens, private keys and literal
-`app_id` / `app_secret` values, and exits non-zero if it finds any. Install it as a pre-commit hook
-so a credential cannot be committed by accident:
+`scripts/check-secrets.ps1` checks tracked files for tokens, keys and literal `app_id`/`app_secret`
+values, and exits non-zero if it finds any. Worth using as a pre-commit hook:
 
 ```bash
 cp scripts/check-secrets.ps1 .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
@@ -165,7 +107,7 @@ pwsh -File scripts/check-secrets.ps1
 
 ## Building
 
-Requires JDK 17 and the Android SDK (platform 35, build-tools 35.0.0).
+JDK 17 and the Android SDK (platform 35, build-tools 35.0.0).
 
 ```bash
 export JAVA_HOME=/path/to/jdk-17
@@ -173,12 +115,12 @@ export ANDROID_HOME=/path/to/android-sdk
 ./gradlew assembleRelease
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk` (~1.9 MB).
+The APK lands in `app/build/outputs/apk/release/`.
 
 ### Signing
 
-The build reads a local keystore from `keystore/local.keystore` if one exists, otherwise it falls
-back to the standard Android debug key. Generate your own:
+It reads `keystore/local.keystore` if it's there, otherwise it falls back to the standard Android
+debug key. To make your own:
 
 ```bash
 keytool -genkeypair -v -keystore keystore/local.keystore -storetype PKCS12 \
@@ -187,208 +129,115 @@ keytool -genkeypair -v -keystore keystore/local.keystore -storetype PKCS12 \
   -dname "CN=Your Name, O=Your Org, C=US"
 ```
 
-Override the defaults with the `QBdlxKeyStorePassword`, `QBdlxKeyAlias` and `QBdlxKeyPassword`
-environment variables.
+The `QBdlxKeyStorePassword`, `QBdlxKeyAlias` and `QBdlxKeyPassword` environment variables override
+the defaults.
 
-**The keystore is git-ignored on purpose.** A published keystore with a known password lets anyone
-sign an update for this application id. If you fork this and publish APKs, use your own key and
-keep it out of the repository.
+The keystore is git-ignored for a reason. A published keystore with a known password means anyone
+can sign an update for this application id. If you fork this, use your own key.
 
-Run the tests:
-
-```bash
-./gradlew testDebugUnitTest           # 21 JVM tests
-./gradlew connectedDebugAndroidTest   # 3 on-device tests (needs a device/emulator)
-```
-
-The instrumented suite is the important one for tagger changes: it catches the
-Android-only failures described above. It needs the `androidTest` source set, which
-reuses the fixtures in `src/test/resources` as assets.
-
-Test fixtures (`sample.flac`, `cover.jpg`, `sample.wav`) are generated, not downloaded —
-see `tools/gen_flac.py` and `tools/gen_jpeg.py`. The JPEG is a real baseline JPEG
-rather than a stub, because JAudioTagger rejects anything it cannot decode into a
-`BufferedImage`.
-
-## Testing with a real account
-
-1. Install the APK.
-2. Sign in with your Qobuz e-mail and password, or switch to **Use an auth token instead** and paste
-   a token.
-3. Search for an album, open it, and press **Download album**.
-4. Watch progress in the **Downloads** tab and in the notification.
-
-A `user_auth_token` must be the full token. Qobuz tokens currently have **64** characters;
-a truncated or stale token is rejected with `HTTP 401 Not authorised`.
-
-Downloads land in `Download/<Artist>/<Album>/` by default (via MediaStore, so no storage
-permission is required). Use **Settings → Download folder** to pick any other folder, including on
-an SD card, through the system folder picker.
-
-## Architecture
-
-```
-api/          QobuzCredentials  bundle scraping → app_id/app_secret
-              QobuzClient       endpoints, auth, getFileUrl signing, pagination
-              Models            kotlinx.serialization models of the API payloads
-data/         SessionStore      persisted auth session
-download/     DownloadQueue     in-memory queue exposed as a StateFlow
-              DownloadEngine    resolve → stream to temp → tag → publish
-              DownloadService   foreground service + notification
-              StorageManager    MediaStore / SAF / legacy destinations
-              MetadataTagger    JAudioTagger tag + cover-art writing
-              RenameTemplates   %placeholder% naming
-settings/     SettingsStore     quality, templates, tag options
-ui/           Compose screens: login, search, album, downloads, settings
-```
-
-### Design notes
-
-- **Downloads never write directly to a public path.** They stream into the app cache, get tagged
-  there, and are only then published to the destination, so a failed or cancelled download can
-  never leave a half-written or untagged file in your library.
-- **Quality degrades automatically.** If a track is not licensed at Hi-Res, the engine retries
-  down the chain `27 → 7 → 6 → 5` rather than failing.
-- **Embedded artwork uses the largest available rendition.** Qobuz publishes each cover at several
-  sizes (`max`, `org`, `2048`, `1400`, `600`, …). The cover written into a file is permanent, so
-  the candidate list is ordered largest-first and probed until one returns real image bytes.
-  Change the size under *Settings → Embedded artwork size*; the desktop app offers the same list.
-- **Truncated downloads are rejected.** The engine compares bytes written against
-  `Content-Length` and fails loudly instead of saving a corrupt file.
-- **Tags with no `FieldKey` in JAudioTagger** (copyright, full release date, ReplayGain) are written
-  through format-native field ids. Unsupported formats skip them silently rather than failing.
-- **Naming templates are sanitised before path splitting**, so a track genuinely titled
-  `Bad/Name` cannot inject extra directory levels.
-
-## Known limitations
-
-- Favourite tracks only; favourite albums/artists are not surfaced in the UI yet.
-- No lyrics fetching (the mobile 0.5.0 build had an LRCLib plugin; that is not ported).
-- No gapless/offline playback — this is a downloader, not a player.
-- Genre/artist browse pages beyond search-then-album are not implemented.
-
-## Releasing
-
-### Manual
-
-`scripts/publish.ps1` (Windows) or `scripts/publish.sh` create the GitHub
-repository, push `main`, tag the release and upload the APK as a release asset.
-They use `$GITHUB_TOKEN` / `$GITHUB_TOKEN` if set, otherwise Git Credential
-Manager.
-
-```powershell
-pwsh -File scripts/publish.ps1
-```
+### Tests
 
 ```bash
-./scripts/publish.sh --tag v1.0.5
+./gradlew testDebugUnitTest           # unit tests
+./gradlew connectedDebugAndroidTest   # on-device tests, needs a device
 ```
 
-### Automatic (tag-triggered CI)
+The on-device suite is the one that matters for tagger changes, since that's where the JVM tests
+lie to you. It reuses the fixtures in `src/test/resources` as assets.
 
-`.github/workflows/release.yml` builds and publishes an APK whenever a `v*` tag is
-pushed. It is **inert until you add one secret**, so it cannot publish anything by
-accident.
+The fixtures are generated rather than downloaded, see `tools/gen_flac.py` and `tools/gen_jpeg.py`.
+The JPEG is a real baseline JPEG, not a stub, because JAudioTagger rejects anything it can't decode
+into a `BufferedImage`.
 
-1. Export your keystore as base64:
+### Testing on a phone
 
-   ```bash
-   base64 -w0 keystore/local.keystore > keystore.b64
-   ```
-
-2. Add repository secrets under *Settings → Secrets and variables → Actions*:
-   `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (the last
-   three can be omitted if you use the `android` / `androiddebugkey` / `android`
-   defaults).
-
-3. Push a tag:
-
-   ```bash
-   git tag -a v1.0.5 -m "v1.0.5" && git push origin v1.0.5
-   ```
-
-> **Signing keys and non-interactive use.** The keystore in this repo is
-> git-ignored, and the workflow decodes it from a secret at build time. If you
-> ever change the key, previously installed builds cannot be updated in place —
-> Android rejects an update whose signing certificate differs, and the user has
-> to uninstall first.
-
-## Theming
-
-Settings → **Appearance** controls the whole look:
-
-| Control | Options |
-|---|---|
-| Theme | Qobuz, AMOLED Black, Midnight, Daylight, Match wallpaper (Android 12+) |
-| Light or dark | Follow system, Dark, Light |
-| Corner rounding | Square → pill slider, applied app-wide |
-| Tint from cover art | Derives the accent from the album you open |
-
-Two deliberate choices worth knowing:
-
-- **Dynamic colour (Material You) is opt-in, not the default.** It replaces the palette with
-  wallpaper colours, which made the app look unstyled on Android 12+. Select *Match wallpaper* to use it.
-- **Accents are contrast-checked.** A colour is only adjusted when it falls below a 4.5:1 WCAG
-  contrast target, so the brand purple and artwork colours stay true rather than being washed out.
-
-A preset declares only a few anchor colours; `ThemePalette` derives the full Material 3 role set from
-them, so a new preset cannot leave roles undefined or light/dark out of step.
-
-## Testing on a device
-
-Wireless ADB is fully automated — there is no IP to remember.
-
-### One-time setup (cable needed once)
+Wireless ADB, no IP to remember:
 
 ```powershell
-pwsh -File scripts/connect-phone.ps1 -Setup
+pwsh -File scripts/connect-phone.ps1 -Setup          # plug the cable in once
+pwsh -File scripts/connect-phone.ps1 -RegisterTask   # then it reconnects by itself
 ```
 
-Plug the cable in for this. It switches the phone's ADB daemon to TCP mode, after
-which the cable is not needed again until the phone reboots.
+It finds the phone over mDNS so a new DHCP lease doesn't matter, and falls back to the last known
+address or USB. The scheduled task reconnects at logon and every few minutes.
 
-### Then, permanently automatic
-
-```powershell
-pwsh -File scripts/connect-phone.ps1 -RegisterTask
-```
-
-Registers a Windows scheduled task that reconnects at logon and every 5 minutes.
-Remove it with `-UnregisterTask`.
-
-### Ad hoc
-
-```powershell
-pwsh -File scripts/connect-phone.ps1              # connect once
-pwsh -File scripts/connect-phone.ps1 -Watch        # stay resident and reconnect
-```
-
-### How it finds the phone
-
-The script discovers the phone over mDNS (`adb mdns services`), so a new DHCP
-lease is picked up automatically — the address is never hardcoded. It falls back
-to the last known-good address, and to USB if a cable happens to be attached.
-
-**Why `adb tcpip` and not the newer paired TLS connection:** `adb tcpip 5555` needs
-no pairing code, but it does not survive a phone reboot. Developer options →
-Wireless debugging *does* survive reboots; enable it if you would rather not have
-the cable fallback. Windows cannot resolve `.local` mDNS names, so the discovered
-IP:port is used rather than the service name.
-
-Run the on-device suite against the phone over Wi-Fi:
+One caveat: `adb tcpip 5555` doesn't survive a phone reboot, so after a restart the phone is
+USB-only until you run `-Setup` again. Enabling Developer options, Wireless debugging on the phone
+does survive reboots if you'd rather avoid that.
 
 ```powershell
 $env:ANDROID_SERIAL = "192.168.4.57:5555"
 ./gradlew connectedDebugAndroidTest
 ```
 
+## Trying it with your account
+
+1. Install the APK.
+2. Sign in with your Qobuz email and password, or tap "Use an auth token instead" and paste a token.
+3. Search for an album, open it, tap "Download album".
+4. Progress shows in the Downloads tab and in a notification.
+
+Qobuz tokens are 64 characters. A truncated or expired one comes back as `HTTP 401 Not authorised`.
+
+Downloads go to `Download/<Artist>/<Album>/` by default through MediaStore, so no storage
+permission is needed. Settings → Download folder lets you pick somewhere else, including an SD card.
+
+## Layout
+
+```
+api/          QobuzCredentials  bundle scraping, app_id/app_secret
+              QobuzClient       endpoints, auth, getFileUrl signing, pagination
+              Models            kotlinx.serialization models
+data/         SessionStore      saved login
+download/     DownloadQueue     in-memory queue as a StateFlow
+              DownloadEngine    resolve, stream to temp, tag, publish
+              DownloadService   foreground service and notification
+              StorageManager    MediaStore / SAF / legacy paths
+              MetadataTagger    tags and cover art
+              FlacPicture       FLAC PICTURE block, written by hand
+              PerformersParser  credits string to artist names
+              RenameTemplates   %placeholder% naming
+playback/     PlayerController  Media3 controller, queue, state
+              PlaybackService   MediaSessionService for background audio
+settings/     SettingsStore     quality, templates, tags, theme
+ui/           Compose screens: login, search, album, artist, playlist, downloads, settings
+ui/theme/     presets, shapes, artwork-derived accent
+```
+
+A few decisions worth explaining:
+
+Downloads never write straight to a public folder. They stream into the app cache, get tagged
+there, and are published once they're good. A cancelled or failed download can't leave a
+half-written file in your library.
+
+If a track isn't licensed at the quality you picked, the downloader walks down
+`27 → 7 → 6 → 5` instead of failing.
+
+Cover art gets the largest rendition available. Qobuz serves each cover at several sizes and the
+embedded copy is permanent, so it tries them largest first and caches which one worked for the
+rest of the album. Responses are checked for being real image data so a placeholder can't end up
+as your artwork.
+
+Dynamic colour is off by default. It replaces the palette with wallpaper colours, which on Android
+12+ makes the app look like it has no design at all. It's there under Settings → Appearance if you
+want it.
+
+Accent colours get checked against WCAG contrast and only adjusted if they fall below 4.5:1, so
+the brand purple and artwork colours stay as intended.
+
+## Not done yet
+
+- Favourite albums and artists. Only favourite tracks.
+- Lyrics. The old mobile app had an LRCLib plugin, this doesn't.
+- Playback quality uses the download quality setting rather than having its own.
+- No gapless playback or queue reordering.
+
 ## Legal
 
-Not affiliated with, endorsed by, or approved by Qobuz. The Qobuz name and brand are trademarks of
-their respective owner. You are responsible for complying with the
+Not affiliated with, endorsed by, or approved by Qobuz. The Qobuz name and brand belong to their
+respective owner. You're responsible for following the
 [Qobuz API Terms of Use](http://static.qobuz.com/apps/api/QobuzAPI-TermsofUse.pdf) and your local
-law. Use with an account you are entitled to use.
+law, and for using an account you're entitled to use.
 
-**Read [`LICENSING.md`](LICENSING.md) before publishing or distributing this project.** None of the
-upstream projects it was ported from declare a license, which limits redistribution even though no
-upstream source code was copied.
+Read [LICENSING.md](LICENSING.md) before you publish or distribute this. None of the upstream
+projects declare a licence, which limits redistribution even though no upstream source was copied.

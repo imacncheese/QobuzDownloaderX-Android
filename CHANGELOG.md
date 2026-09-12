@@ -2,189 +2,133 @@
 
 ## 1.3.0
 
-### Fixed
+Fixed two things that were wired up but never called, which is why they looked
+like features that didn't work.
 
-- **Tapping an album showed an empty screen.** `openAlbum` was defined but never called — the
-  `LaunchedEffect` that triggered the fetch was lost when navigation was rewritten for the animated
-  transitions. The album id changed and the screen opened, but no request was ever made. Loaders are
-  now driven by the navigation target, so every detail screen also works after process death and from
-  a restored back stack, not only on a fresh tap.
-- **Tapping a track did nothing.** `TrackRow` had no play action at all — only download. Tapping now
-  plays and queues the visible results.
-- **Album pagination stopped early when Qobuz omitted `total`.** The loop used `all.size < total`,
-  which is immediately false when `total` is absent. It now follows the desktop app's `total == 0`
-  handling and is bounded by a page count rather than an offset.
-- Replaced the album screen's generic "nothing here" fallback with messages that distinguish an
-  unloadable release from one that genuinely has no tracks.
+- Tapping an album opened an empty screen. `openAlbum` existed but nothing ever
+  called it; the `LaunchedEffect` that kicked off the fetch got lost when I
+  rewrote navigation for the animated transitions. The id changed and the screen
+  opened, but no request was ever made. Loaders now run off the navigation
+  target, so the detail screens also survive process death and a restored back
+  stack.
+- Tapping a track did nothing. `TrackRow` only had a download button, no play
+  action. It plays now, and queues the results you can see.
 
-### Added
+Also:
 
-- **Artist screen** listing an artist's releases; tapping a release opens it.
-- **Playlist screen** listing its tracks, with Play all and Download playlist.
-
-### Changed
-
-- Detail navigation is a single typed target (album / artist / playlist) rather than a bare album id.
-  That typing is what exposed two screens being reachable without their loaders wired up.
+- Album pagination stopped after one page when Qobuz left out `total`. The loop
+  condition was `all.size < total`, which is false straight away when `total` is
+  missing. It follows the desktop app's handling now and is bounded by page count
+  instead of offset.
+- The album screen's catch-all "nothing here" message is gone. It now says
+  whether the release couldn't load or genuinely has no tracks.
+- Added an artist screen (their releases) and a playlist screen (tracks, play
+  all, download).
+- Detail navigation is one typed target instead of a bare album id. That typing
+  is what showed two screens were reachable without their loaders hooked up.
 
 ## 1.2.0
 
-### Added
-
-- **Embedded player with background playback.** Tapping a track starts it; the whole album becomes the
-  queue so next/previous work. Playback runs in a Media3 `MediaSessionService`, so audio continues
-  when the app is backgrounded or the screen is locked, with lock-screen and notification controls.
-  Includes a mini player above the navigation bar and a full now-playing screen with seek.
-- **Playlist search.** A fourth search tab returns playlists with cover, owner and track count.
-
-### Changed
-
-- Track rows in an album now play on tap instead of doing nothing; the playing row is highlighted and
-  its number is replaced by a play/pause indicator.
-
-### Diagnostics
-
-- `album/get` now logs the album title, the `tracks_count` field, and the actual track-page size. The
-  previous behaviour was an empty album screen with no explanation; that path is now observable in
-  logcat under `QbdlxApi` and `QbdlxAlbum`.
-
-### Known gaps
-
-- Playlist detail is not implemented: playlist covers are tappable targets but no detail screen exists yet.
-- Streaming quality follows the download-quality setting rather than a separate playback preference.
+- Added the player. Media3 ExoPlayer inside a `MediaSessionService`, so audio
+  keeps going when the app is backgrounded or the screen locks, with lock screen
+  and notification controls. Tapping a track plays it and queues the album. Mini
+  player above the nav bar, full screen player with seek.
+- Stream URLs are signed and expire, so they're resolved close to play time and
+  a few tracks ahead. Resolution falls back through the same quality chain as
+  downloads.
+- Added a playlist search tab.
 
 ## 1.1.0
 
-### Added
-
-- **Themes.** Four presets — Qobuz (purple/cyan), AMOLED Black, Midnight and Daylight — plus
-  *Match wallpaper* on Android 12+. Each preset derives a complete Material 3 role set, so light and
-  dark stay in step rather than being hand-listed per mode.
-- **Light / dark / follow-system toggle**, independent of the preset.
-- **Corner rounding slider**, from square to pill. Applies to cover art, cards, fields and Material
-  role shapes through a single setting rather than per-screen radii.
-- **Tint the app from cover art.** Opening an album can drive the accent colour from its artwork via
-  AndroidX Palette, which picks a vibrant swatch instead of averaging pixels to grey.
-- **Redesigned album screen**: blurred artwork behind the header, a larger cover, release metadata and
-  a gradient scrim so text stays readable over any cover.
-- **Animated transitions** between the list and album detail views.
-
-### Changed
-
-- **Dynamic colour is no longer forced on.** It previously overrode the brand palette on Android 12+,
-  which is why the app looked unstyled on modern devices. It is now an explicit choice.
-- Accent colours are checked against WCAG relative luminance and lifted only when they fall below a
-  4.5:1 contrast target, so passing colours (including the brand purple) are left untouched.
+- Four themes: Qobuz, AMOLED Black, Midnight, Daylight, plus Match wallpaper.
+  A preset only declares a few colours and the full Material 3 set is derived
+  from them, so light and dark can't drift apart.
+- Light/dark/system toggle, and a corner rounding slider applied everywhere
+  through `LocalShapes`.
+- Opening an album can tint the whole app from its cover art.
+- Album screen redone with a blurred header and a bigger cover, plus animated
+  transitions.
+- Dynamic colour is no longer forced on. It was overriding the palette on
+  Android 12+, which is why the app looked undesigned on newer phones.
+- Accents are checked against WCAG contrast and only changed if they're under
+  4.5:1. The brand purple is 3.66:1 on the dark background so it gets lifted;
+  the dark mode primary is 9.3:1 and is left alone.
 
 ## 1.0.7
 
-### Fixed
-
-- **Artwork probing was repeated per track.** Resolving the largest rendition means
-  trying candidates until one works, which for a 20-track album could mean ~200 requests for the
-  same cover. The first track now resolves the rendition and sibling tracks reuse it.
+- Artwork was being probed per track. Resolving the largest rendition means
+  trying candidates until one works, so a 20 track album could make about 200
+  requests for one cover. The first track resolves it now and the rest reuse it.
+  Failures aren't cached, so a flaky CDN response can't pin a smaller size.
 
 ## 1.0.6
 
-### Changed
-
-- **Embedded album art now uses the largest available rendition.** The previous code tried `_1400`
-  then `_600`, so covers were capped well below what Qobuz publishes. Candidate URLs are now
-  ordered largest-first (`max`, `org`, `2048`, `1400`, `1000`, `600`, …) and probed until one
-  returns real image bytes, matching the size list the desktop app offers.
-- Added a **Settings → Embedded artwork size** control, defaulting to Maximum available.
-
-### Fixed
-
-- **A placeholder response could be embedded as album art.** A rendition that does not exist does
-  not always answer with a clean 404, so responses are now validated as real JPEG/PNG data of a
-  plausible size before being written into a file.
+- Embedded cover art uses the largest rendition Qobuz has. It was capped around
+  `_1400` falling back to `_600`, and the fallback ran the wrong way, going down
+  instead of up. Candidate URLs are now ordered largest first and probed until
+  one returns real image bytes.
+- A missing rendition doesn't always 404 cleanly, so responses are checked for
+  being actual JPEG/PNG data of a plausible size. A placeholder can't get
+  embedded as your artwork any more.
 
 ## 1.0.5
 
-### Security
+Security cleanup.
 
-- **Removed a live Qobuz `app_id`/`app_secret` pair from the documentation.** The README quoted a
-  real credential extracted from the web-player bundle as an illustrative example. It is now a
-  placeholder, and the README states plainly that the extracted pair is never committed.
-- **Removed a real credential from the test suite.** The `track/getFileUrl` signature test used a
-  genuine `app_secret` as a fixture; it now uses a zeroed placeholder. The signature algorithm is
-  independent of the input values, so the test still guards against reordering the concatenation.
-- **Removed the personal account name from the publish scripts**, which is now resolved from the
-  authenticated GitHub user.
-- Verified that no `app_id`, `app_secret`, token, private key or owner name remains anywhere in the
-  repository.
-
-## 1.0.4
-
-### Fixed
-
-- **Artist tags were derived from raw credits.** Qobuz sends a role-annotated performers string
-  (`"Radiohead, MainArtist - Nigel Godrich, Producer - ..."`). The previous shortcut could put
-  producers, engineers and mixers into the ARTIST tag. Ported the desktop app's `PerformersParser`
-  and role mapping; only main/featured artist roles are used now.
-- **Album artists** are now selected from `album.artists[].roles` instead of joining every credited
-  name. The `roles` field was missing from the API model entirely.
-- Featured artists are dropped when the track title already advertises the feature, avoiding
-  duplicated names.
-- A wrapped line inside a performers value is treated as a line wrap (single newline), while a blank
-  line separates entries.
-
-## 1.0.3
-
-### Added
-
-- **Download album directly from search results.** Album rows had no download action at all; the
-  button only existed one level deeper on the album screen. Search results now show a per-album
-  download button that fetches the full track list and queues it.
-
-### Fixed
-
-- The album screen's download button was disabled with no explanation when its track list had not
-  loaded. It now shows progress while fetching and reports failures and empty releases.
+- Removed a live `app_id`/`app_secret` pair from the README. I'd used a real one
+  as an example. It's a placeholder now.
+- Removed a real credential from the test suite. The signature test used a
+  genuine `app_secret` as a fixture; it's zeroed out now. The test still guards
+  the concatenation order, which doesn't depend on the values.
+- Removed my account name from the publish scripts. It's resolved from whoever
+  is authenticated.
+- Checked the whole repo for `app_id`, `app_secret`, tokens, keys and owner
+  names.
 
 ## 1.0.2
 
-### Fixed
-
-- **Tagging was silently skipped for every download.** The download engine writes audio to
-  `qbdlx_<id>.part` and the tagger's working copy was `qbdlx_<id>.tagged`. JAudioTagger dispatches
-  its reader on the file extension, so it threw `CannotReadException: No Reader associated with this
-  extension: tagged`, and the untagged file was published. The working copy now carries the real
-  audio extension, detected from magic bytes.
-- **Cover art was fetched from a single URL** and gave up after one failure (`cover art: 0 bytes`).
-  It now walks every known rendition and stops at the first that returns bytes.
-- **Album folders were named `[FLAC 24-0.0kHz]`** because the template used only the album's sample
-  rate, which Qobuz frequently omits or sends as `0`. The track value now wins, with the album as
-  fallback, and a missing value produces nothing.
-- `Cover.jpg` writes raced and a second one threw; they now overwrite cleanly and never fail a
-  download.
+- Tagging was being skipped on every download. The engine writes to
+  `qbdlx_<id>.part` and the tagger's working copy was `qbdlx_<id>.tagged`.
+  JAudioTagger picks its reader from the extension, so it threw
+  `CannotReadException: No Reader associated with this extension: tagged` and
+  published the untagged file. The working copy gets the real extension now,
+  sniffed from the magic bytes.
+- Cover art came from a single URL and gave up after one failure, logging
+  `cover art: 0 bytes`. It walks the renditions now.
+- Album folders came out as `[FLAC 24-0.0kHz]` because the template used only
+  the album's sample rate, which Qobuz often omits or sends as `0`. The track
+  value wins, with the album as fallback.
+- Writing `Cover.jpg` twice raced and the second one threw. It overwrites
+  cleanly and never fails the download.
 
 ## 1.0.1
 
-### Fixed
-
-- **A tagging failure could discard a completed download.** Tagging ran before the file was
-  published, so any tagger exception meant the user got nothing. Tagging is now best-effort and runs
-  on a working copy: if it fails or damages the file, the untouched original is published with a
-  warning.
-- **FLAC cover art could never work on Android.** `FlacTag.createField` decodes artwork through
-  `javax.imageio.ImageIO` and `java.awt.image.BufferedImage`, neither of which exists on Android —
-  it failed with `NoClassDefFoundError: Failed resolution of: Ljavax/imageio/ImageIO`. Cover art is
-  now written as a native FLAC `PICTURE` metadata block.
-- **Concurrent workers could download the same track twice.** Queue claiming is now atomic.
-- A track titled `Bad/Name` could inject extra directory levels into the output path; templates are
-  sanitised before being split.
+- A tagging failure could throw away a finished download. Tagging ran before the
+  file was published, so any tagger exception meant you got nothing. It runs on
+  a copy and is best-effort now: if it fails or damages the file, the untouched
+  original is published with a warning.
+- FLAC cover art never worked on Android. `FlacTag.createField` decodes through
+  `javax.imageio.ImageIO` and `java.awt.image.BufferedImage`, and Android has
+  neither, so it failed with
+  `NoClassDefFoundError: Failed resolution of: Ljavax/imageio/ImageIO`.
+  `FlacPicture` writes the FLAC PICTURE block directly instead. MP3 still uses
+  JAudioTagger, whose ID3 path doesn't need AWT.
+- Two workers could claim the same track and download it twice. Queue claiming
+  is atomic now.
+- A track titled `Bad/Name` could add a folder level. Templates are sanitised
+  before being split on `/`.
 
 ## 1.0.0
 
-Initial release: Kotlin/Compose port of the QBDLX desktop application.
+First release. Kotlin and Compose port of the QBDLX desktop app.
 
-- Email/password and auth-token sign-in.
-- Live `app_id` / `app_secret` discovery from the Qobuz web-player bundle.
-- Search across albums, tracks and artists.
-- Album and single-track downloads at MP3 320 / FLAC 16-bit / FLAC 24-bit ≤96 kHz / Hi-Res.
-- Automatic quality fallback (`27 → 7 → 6 → 5`) when a release is not licensed at full quality.
-- Metadata tagging with cover art, and `%placeholder%` file naming.
-- Storage via MediaStore, the system folder picker, or legacy public storage.
-- Foreground-service downloads with progress notification.
+- Email/password and auth token login.
+- Live `app_id`/`app_secret` discovery from the Qobuz web player bundle.
+- Search albums, tracks and artists.
+- Album and single track downloads at MP3 320, FLAC 16-bit, FLAC 24-bit up to
+  96kHz, and Hi-Res.
+- Quality falls back down `27 → 7 → 6 → 5` when a release isn't licensed at the
+  quality you asked for.
+- Tags and cover art written into the files, `%placeholder%` naming templates.
+- Storage through MediaStore, the system folder picker, or legacy public paths.
+- Foreground service downloads with a progress notification.
