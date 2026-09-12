@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -62,6 +63,7 @@ import kotlinx.coroutines.delay
 fun SearchScreen(
     vm: AppViewModel,
     onOpenAlbum: (String) -> Unit,
+    onOpenArtist: (String) -> Unit = {},
     onOpenPlaylist: (String) -> Unit = {},
 ) {
     val state by vm.search.collectAsStateWithLifecycle()
@@ -146,15 +148,41 @@ fun SearchScreen(
                                     album = album,
                                     busy = albumDownload.loading &&
                                         albumDownload.albumId == album.idString,
-                                    onOpen = { album.idString?.let(onOpenAlbum) },
+                                    onOpen = {
+                                        // Logged because a null id here means the tap
+                                        // silently does nothing, which is indistinguishable
+                                        // from a broken screen.
+                                        val id = album.idString
+                                        android.util.Log.i(
+                                            "QbdlxTap",
+                                            "album tapped: title='${album.title}' id=$id",
+                                        )
+                                        if (id == null) {
+                                            android.util.Log.w(
+                                                "QbdlxTap",
+                                                "album has no id, cannot open. raw=${album.id}",
+                                            )
+                                        } else {
+                                            onOpenAlbum(id)
+                                        }
+                                    },
                                     onDownload = { album.idString?.let(vm::downloadAlbumById) },
                                 )
                             }
-                            AppViewModel.SearchTab.TRACKS -> items(state.tracks, key = { it.idString ?: it.hashCode().toString() }) { track ->
-                                TrackRow(track, onDownload = { vm.downloadTrack(track) }, onOpenAlbum = onOpenAlbum)
+                            AppViewModel.SearchTab.TRACKS -> itemsIndexed(state.tracks, key = { _, t -> t.idString ?: t.hashCode().toString() }) { index, track ->
+                                TrackRow(
+                                    track = track,
+                                    onPlay = {
+                                        // Queue the visible results so next/previous
+                                        // walk the list the user is looking at.
+                                        vm.playTracks(state.tracks, index)
+                                    },
+                                    onDownload = { vm.downloadTrack(track) },
+                                    onOpenAlbum = onOpenAlbum,
+                                )
                             }
                             AppViewModel.SearchTab.ARTISTS -> items(state.artists, key = { it.idString ?: it.hashCode().toString() }) { artist ->
-                                ArtistRow(artist)
+                                ArtistRow(artist) { artist.idString?.let(onOpenArtist) }
                             }
                             AppViewModel.SearchTab.PLAYLISTS -> items(state.playlists, key = { it.idString ?: it.hashCode().toString() }) { playlist ->
                                 PlaylistRow(
@@ -243,11 +271,17 @@ private fun AlbumRow(
 }
 
 @Composable
-private fun TrackRow(track: Track, onDownload: () -> Unit, onOpenAlbum: (String) -> Unit) {
+private fun TrackRow(
+    track: Track,
+    onPlay: () -> Unit,
+    onDownload: () -> Unit,
+    onOpenAlbum: (String) -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(LocalShapes.current.card)
+            .clickable(onClick = onPlay)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -287,10 +321,12 @@ private fun TrackRow(track: Track, onDownload: () -> Unit, onOpenAlbum: (String)
 }
 
 @Composable
-private fun ArtistRow(artist: Artist) {
+private fun ArtistRow(artist: Artist, onOpen: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(LocalShapes.current.card)
+            .clickable(onClick = onOpen)
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -311,6 +347,11 @@ private fun ArtistRow(artist: Artist) {
                 )
             }
         }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

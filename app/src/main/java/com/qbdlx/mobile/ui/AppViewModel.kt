@@ -204,20 +204,144 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _album = MutableStateFlow(AlbumUi())
     val album: StateFlow<AlbumUi> = _album.asStateFlow()
 
+    // ----------------------------------------------------------- artist state
+
+    data class ArtistUi(
+        val artistId: String? = null,
+        val loading: Boolean = false,
+        val artist: com.qbdlx.mobile.api.Artist? = null,
+        val error: String? = null,
+    )
+
+    private val _artist = MutableStateFlow(ArtistUi())
+    val artist: StateFlow<ArtistUi> = _artist.asStateFlow()
+
+    /**
+     * Loads an artist and their releases.
+     *
+     * Called on navigation rather than on tap, matching [openAlbum], so the screen
+     * also works after process death or from a restored back stack.
+     */
+    fun openArtist(artistId: String) {
+        android.util.Log.i("QbdlxArtist", "openArtist ENTER id=$artistId")
+        if (_artist.value.artistId == artistId && _artist.value.artist != null) {
+            android.util.Log.i("QbdlxArtist", "openArtist SKIPPED (already loaded)")
+            return
+        }
+        _artist.value = ArtistUi(artistId = artistId, loading = true)
+        viewModelScope.launch {
+            try {
+                val full = client.getArtist(artistId)
+                android.util.Log.i(
+                    "QbdlxArtist",
+                    "openArtist OK id=$artistId name='${full.name}' albums=${full.albums?.items?.size ?: 0}",
+                )
+                _artist.value = ArtistUi(artistId = artistId, loading = false, artist = full)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                android.util.Log.w("QbdlxArtist", "openArtist FAILED id=$artistId: $e", e)
+                _artist.value = ArtistUi(artistId = artistId, loading = false, error = friendly(e))
+            }
+        }
+    }
+
+    fun refreshArtist() {
+        _artist.value.artistId?.let { id ->
+            _artist.value = ArtistUi(artistId = id, loading = true)
+            viewModelScope.launch {
+                try {
+                    _artist.value = ArtistUi(
+                        artistId = id,
+                        loading = false,
+                        artist = client.getArtist(id),
+                    )
+                } catch (e: Throwable) {
+                    _artist.value = ArtistUi(artistId = id, loading = false, error = friendly(e))
+                }
+            }
+        }
+    }
+
+    // --------------------------------------------------------- playlist state
+
+    data class PlaylistUi(
+        val playlistId: String? = null,
+        val loading: Boolean = false,
+        val playlist: Playlist? = null,
+        val error: String? = null,
+    )
+
+    private val _playlist = MutableStateFlow(PlaylistUi())
+    val playlist: StateFlow<PlaylistUi> = _playlist.asStateFlow()
+
+    fun openPlaylist(playlistId: String) {
+        android.util.Log.i("QbdlxPlaylist", "openPlaylist ENTER id=$playlistId")
+        if (_playlist.value.playlistId == playlistId && _playlist.value.playlist != null) {
+            android.util.Log.i("QbdlxPlaylist", "openPlaylist SKIPPED (already loaded)")
+            return
+        }
+        _playlist.value = PlaylistUi(playlistId = playlistId, loading = true)
+        viewModelScope.launch {
+            try {
+                val full = client.getPlaylist(playlistId)
+                android.util.Log.i(
+                    "QbdlxPlaylist",
+                    "openPlaylist OK id=$playlistId name='${full.name}' tracks=${full.tracks?.items?.size ?: 0}",
+                )
+                _playlist.value = PlaylistUi(playlistId = playlistId, loading = false, playlist = full)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                android.util.Log.w("QbdlxPlaylist", "openPlaylist FAILED id=$playlistId: $e", e)
+                _playlist.value = PlaylistUi(playlistId = playlistId, loading = false, error = friendly(e))
+            }
+        }
+    }
+
+    fun refreshPlaylist() {
+        _playlist.value.playlistId?.let { id ->
+            _playlist.value = PlaylistUi(playlistId = id, loading = true)
+            viewModelScope.launch {
+                try {
+                    _playlist.value = PlaylistUi(
+                        playlistId = id,
+                        loading = false,
+                        playlist = client.getPlaylist(id),
+                    )
+                } catch (e: Throwable) {
+                    _playlist.value = PlaylistUi(playlistId = id, loading = false, error = friendly(e))
+                }
+            }
+        }
+    }
+
     fun openAlbum(albumId: String) {
-        if (_album.value.albumId == albumId && _album.value.album != null) return
+        android.util.Log.i(
+            "QbdlxAlbum",
+            "openAlbum ENTER id=$albumId previous=${_album.value.albumId} hasAlbum=${_album.value.album != null}",
+        )
+        if (_album.value.albumId == albumId && _album.value.album != null) {
+            android.util.Log.i("QbdlxAlbum", "openAlbum SKIPPED (already loaded) id=$albumId")
+            return
+        }
         _album.value = AlbumUi(albumId = albumId, loading = true)
         viewModelScope.launch {
+            android.util.Log.i("QbdlxAlbum", "openAlbum coroutine started id=$albumId")
             try {
                 val full = client.getFullAlbum(albumId)
                 val tracks = full.tracks?.items.orEmpty().size
                 android.util.Log.i(
                     "QbdlxAlbum",
-                    "openAlbum id=$albumId title='${full.title}' tracks=$tracks",
+                    "openAlbum OK id=$albumId title='${full.title}' tracks=$tracks",
                 )
                 _album.value = AlbumUi(albumId = albumId, loading = false, album = full)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Rethrow: this is structured cancellation, not an app failure.
+                android.util.Log.w("QbdlxAlbum", "openAlbum CANCELLED id=$albumId")
+                throw e
             } catch (e: Throwable) {
-                android.util.Log.w("QbdlxAlbum", "openAlbum id=$albumId failed", e)
+                android.util.Log.w("QbdlxAlbum", "openAlbum FAILED id=$albumId: $e", e)
                 _album.value = AlbumUi(albumId = albumId, loading = false, error = friendly(e))
             }
         }
@@ -312,6 +436,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         enqueueAndStart(listOf(track.toDownloadItem(track.album)))
     }
 
+    /** Queues a whole list of tracks, used by playlist downloads. */
+    fun downloadTracks(tracks: List<Track>) {
+        val items = tracks.filter { !it.idString.isNullOrBlank() }.map { it.toDownloadItem(it.album) }
+        enqueueAndStart(items)
+    }
+
     private fun enqueueAndStart(items: List<DownloadItem>) {
         if (items.isEmpty()) return
         DownloadQueue.enqueue(items)
@@ -364,7 +494,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun playTracks(tracks: List<Track>, startIndex: Int, album: Album? = null) {
         val usable = tracks.filter { !it.idString.isNullOrBlank() }
-        if (usable.isEmpty()) return
+        android.util.Log.i(
+            "QbdlxPlayer",
+            "playTracks called: requested=$startIndex usable=${usable.size} of ${tracks.size}",
+        )
+        if (usable.isEmpty()) {
+            android.util.Log.w("QbdlxPlayer", "playTracks: no tracks with ids, nothing to play")
+            return
+        }
         val start = usable.indexOfFirst { it.idString == tracks.getOrNull(startIndex)?.idString }
             .takeIf { it >= 0 } ?: 0
 

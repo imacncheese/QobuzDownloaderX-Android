@@ -45,8 +45,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.artworkUrl
 import com.qbdlx.mobile.ui.screens.AlbumScreen
+import com.qbdlx.mobile.ui.screens.ArtistScreen
 import com.qbdlx.mobile.ui.screens.DownloadsScreen
 import com.qbdlx.mobile.ui.screens.LoginScreen
+import com.qbdlx.mobile.ui.screens.PlaylistScreen
 import com.qbdlx.mobile.ui.screens.SearchScreen
 import com.qbdlx.mobile.ui.screens.SettingsScreen
 import com.qbdlx.mobile.settings.SettingsStore
@@ -92,6 +94,40 @@ private enum class Tab(val labelRes: Int, val icon: ImageVector) {
     SETTINGS(R.string.nav_settings, Icons.Filled.Settings),
 }
 
+/**
+ * A screen pushed over the tab content.
+ *
+ * Modelled as one sealed value rather than three separate id fields so the
+ * transition and back handling stay in one place, and so a detail screen cannot
+ * be opened without its loader being triggered.
+ */
+private sealed interface DetailTarget {
+    val id: String
+
+    data class Album(override val id: String) : DetailTarget
+    data class Artist(override val id: String) : DetailTarget
+    data class Playlist(override val id: String) : DetailTarget
+}
+
+/** Saveable representation, so state survives process death. */
+private fun DetailTarget.toKey(): String = when (this) {
+    is DetailTarget.Album -> "album:$id"
+    is DetailTarget.Artist -> "artist:$id"
+    is DetailTarget.Playlist -> "playlist:$id"
+}
+
+private fun detailFromKey(key: String?): DetailTarget? {
+    if (key.isNullOrBlank()) return null
+    val parts = key.split(':', limit = 2)
+    if (parts.size != 2 || parts[1].isBlank()) return null
+    return when (parts[0]) {
+        "album" -> DetailTarget.Album(parts[1])
+        "artist" -> DetailTarget.Artist(parts[1])
+        "playlist" -> DetailTarget.Playlist(parts[1])
+        else -> null
+    }
+}
+
 @Composable
 private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
     val session by vm.signedIn.collectAsStateWithLifecycle()
@@ -120,8 +156,11 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
         }
 
         var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
-        var openAlbumId by rememberSaveable { mutableStateOf<String?>(null) }
+        var detailKey by rememberSaveable { mutableStateOf<String?>(null) }
         var playerExpanded by rememberSaveable { mutableStateOf(false) }
+
+        val detail = detailFromKey(detailKey)
+        fun open(target: DetailTarget?) { detailKey = target?.toKey() }
 
         val playback by vm.playback.collectAsStateWithLifecycle()
 
@@ -131,7 +170,7 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
         DisposableEffect(Unit) { onDispose { vm.releasePlayer() } }
 
         // Reset the detail view when the user switches tabs.
-        LaunchedEffect(tab) { openAlbumId = null }
+        LaunchedEffect(tab) { open(null) }
 
         if (playerExpanded && playback.hasItem) {
             FullPlayer(
@@ -145,9 +184,8 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
             return@QobuzDlxTheme
         }
 
-        val albumId = openAlbumId
         AnimatedContent(
-            targetState = albumId,
+            targetState = detail,
             transitionSpec = {
                 // Slide the detail view in over the list, and back out on close.
                 val forward = targetState != null
@@ -155,10 +193,32 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
                 (slideInHorizontally(animationSpec = tween(280)) { offset(it) } + fadeIn(tween(220))) togetherWith
                     (slideOutHorizontally(animationSpec = tween(280)) { -offset(it) } + fadeOut(tween(160)))
             },
-            label = "album",
-        ) { detailId ->
-            if (detailId != null) {
-                AlbumScreen(vm, onBack = { openAlbumId = null })
+            label = "detail",
+        ) { target ->
+            if (target != null) {
+                // Each loader is triggered here rather than on tap, so the screens
+                // also work after process death or from a restored back stack. This
+                // is what was missing when tapping an album showed an empty screen.
+                when (target) {
+                    is DetailTarget.Album -> {
+                        LaunchedEffect(target.id) { vm.openAlbum(target.id) }
+                        AlbumScreen(vm, onBack = { open(null) })
+                    }
+
+                    is DetailTarget.Artist -> {
+                        LaunchedEffect(target.id) { vm.openArtist(target.id) }
+                        ArtistScreen(
+                            vm = vm,
+                            onBack = { open(null) },
+                            onOpenAlbum = { open(DetailTarget.Album(it)) },
+                        )
+                    }
+
+                    is DetailTarget.Playlist -> {
+                        LaunchedEffect(target.id) { vm.openPlaylist(target.id) }
+                        PlaylistScreen(vm, onBack = { open(null) })
+                    }
+                }
             } else {
                 Scaffold(
                     bottomBar = {
@@ -190,8 +250,9 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
                         when (tab) {
                             Tab.SEARCH -> SearchScreen(
                                 vm = vm,
-                                onOpenAlbum = { openAlbumId = it },
-                                onOpenPlaylist = { /* playlist detail is not implemented yet */ },
+                                onOpenAlbum = { open(DetailTarget.Album(it)) },
+                                onOpenArtist = { open(DetailTarget.Artist(it)) },
+                                onOpenPlaylist = { open(DetailTarget.Playlist(it)) },
                             )
                             Tab.DOWNLOADS -> DownloadsScreen(vm)
                             Tab.SETTINGS -> SettingsScreen(vm)

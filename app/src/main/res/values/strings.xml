@@ -41,6 +41,18 @@
     <string name="download_track">Download</string>
     <string name="loading_tracks">Loading tracks…</string>
     <string name="album_no_tracks">This release has no streamable tracks.</string>
+    <string name="album_unavailable">Could not load this release. Pull back and try again, or check the log under QbdlxApi.</string>
+    <string name="artist_album_count">%1$d releases</string>
+    <string name="artist_no_albums">No releases returned for this artist.</string>
+    <string name="artist_unavailable">Could not load this artist. Go back and try again.</string>
+    <string name="playlist_track_count">%1$d tracks</string>
+    <string name="playlist_no_tracks">This playlist has no tracks.</string>
+    <string name="playlist_no_tracks_hint">Qobuz returned an empty playlist. It may be private or unavailable in your region.</string>
+    <string name="playlist_unavailable">Could not load this playlist. Go back and try again.</string>
+    <string name="play_all">Play all</string>
+    <string name="download_playlist">Download playlist</string>
+    <string name="album_loading">Loading release…</string>
+    <string name="album_no_tracks_hint">Qobuz returned no tracks for this release. It may be unavailable in your region or plan.</string>
     <string name="tracks_count">%1$d tracks</string>
     <string name="hires_badge">Hi-Res</string>
 

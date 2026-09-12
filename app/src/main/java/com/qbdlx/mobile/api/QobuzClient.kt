@@ -196,46 +196,65 @@ class QobuzClient(
             album
         }
 
-    /** Fetches every track of an album, following the pagination loop from the C# GetInfo class. */
+    /**
+     * Fetches every track of an album, following the pagination loop from the C#
+     * GetInfo class.
+     *
+     * The desktop version keeps paging while `total == 0 && items.Count > 0 ||
+     * allItems.Count < total`. The `total == 0` half matters: some releases (and
+     * some responses) omit `total` entirely, and a plain `all.size < total` guard
+     * stops immediately in that case, silently returning a single page or nothing.
+     */
     suspend fun getFullAlbum(albumId: String): Album = withContext(Dispatchers.IO) {
         val first = getAlbum(albumId)
         val page = first.tracks
 
         Log.i(
             TAG,
-            "album/get id=$albumId -> title='${first.title}' tracksCountField=${first.tracks_count} " +
-                "tracksPage=${if (page == null) "null" else "items=${page.items.size} total=${page.total}"}",
+            "album/get id=$albumId -> title='${first.title}' " +
+                "tracks_count=${first.tracks_count} " +
+                "page=${page?.let { "items=${it.items.size} total=${it.total} limit=${it.limit}" } ?: "null"}",
         )
 
         if (page == null) {
-            // The album loaded but carried no track page at all. Surfacing this in
-            // logcat is the difference between "the screen is empty" and knowing why.
+            // Album loaded but carried no track page. Real cause is usually a
+            // release whose tracks Qobuz will not serve for this account.
             Log.w(TAG, "album/get returned no tracks object for id=$albumId")
             return@withContext first
         }
 
-        val total = page.total ?: page.items.size
-        if (page.items.size >= total) return@withContext first
-
-        val s = requireSession()
+        val declaredTotal = page.total ?: 0
         val all = page.items.toMutableList()
         var offset = page.items.size
-        while (all.size < total && offset < MAX_OFFSET) {
-            val params = linkedMapOf(
-                "app_id" to s.appId,
-                "user_auth_token" to s.userAuthToken,
-                "album_id" to albumId,
-                "limit" to "500",
-                "offset" to offset.toString(),
+
+        // Page on until we have everything, or until a page comes back empty.
+        // `declaredTotal <= 0` means "unknown", so rely on empty pages to stop.
+        var guard = 0
+        while (guard++ < MAX_PAGES) {
+            val haveAll = declaredTotal > 0 && all.size >= declaredTotal
+            val nothingMore = declaredTotal <= 0 && all.isEmpty()
+            if (haveAll || nothingMore) break
+
+            val next = parse<Album>(
+                getJson(
+                    paramUrl("album/get", linkedMapOf(
+                        "app_id" to requireSession().appId,
+                        "user_auth_token" to requireSession().userAuthToken,
+                        "album_id" to albumId,
+                        "limit" to PAGE_SIZE.toString(),
+                        "offset" to offset.toString(),
+                    ))
+                )
             )
-            val next = parse<Album>(getJson(paramUrl("album/get", params)))
-            val items = next.tracks?.items ?: break
+            val items = next.tracks?.items.orEmpty()
             if (items.isEmpty()) break
             all += items
             offset += items.size
+            if (declaredTotal <= 0 && items.size < PAGE_SIZE) break
         }
-        Log.i(TAG, "album/get id=$albumId collected ${all.size} of $total tracks")
-        first.copy(tracks = page.copy(items = all))
+
+        Log.i(TAG, "album/get id=$albumId collected ${all.size} tracks (declared total=$declaredTotal)")
+        first.copy(tracks = page.copy(items = all, total = maxOf(declaredTotal, all.size)))
     }
 
     suspend fun getTrack(trackId: String): Track = withContext(Dispatchers.IO) {
@@ -269,7 +288,8 @@ class QobuzClient(
 
         val all = page.items.toMutableList()
         var offset = page.items.size
-        while (all.size < total && offset < MAX_OFFSET) {
+        var guard = 0
+        while (all.size < total && guard++ < MAX_PAGES) {
             val next = parse<Artist>(
                 getJson(
                     paramUrl("artist/get", linkedMapOf(
@@ -310,7 +330,8 @@ class QobuzClient(
 
         val all = page.items.toMutableList()
         var offset = page.items.size
-        while (all.size < total && offset < MAX_OFFSET) {
+        var guard = 0
+        while (all.size < total && guard++ < MAX_PAGES) {
             val next = parse<Playlist>(
                 getJson(
                     paramUrl("playlist/get", linkedMapOf(
@@ -344,7 +365,8 @@ class QobuzClient(
         val userId = s.userId ?: throw QobuzApiException.Auth("No user id in session.")
         val out = mutableListOf<Track>()
         var offset = 0
-        while (offset < MAX_OFFSET) {
+        var guard = 0
+        while (guard++ < MAX_PAGES) {
             val body = getJson(
                 paramUrl("favorite/getUserFavorites", linkedMapOf(
                     "app_id" to s.appId,
@@ -541,7 +563,9 @@ class QobuzClient(
 
     companion object {
         const val BASE_URL = "https://www.qobuz.com/api.json/0.2/"
-        private const val MAX_OFFSET = 100_000
+        private const val PAGE_SIZE = 500
+        /** Bound on pagination so a wrong `total` cannot loop forever. */
+        private const val MAX_PAGES = 100
         private const val TAG = "QbdlxApi"
 
         fun md5Hex(input: String): String {

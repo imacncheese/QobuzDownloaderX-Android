@@ -48,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -99,7 +100,13 @@ fun AlbumScreen(
 
                 state.album != null -> AlbumContent(state.album!!, vm)
 
-                else -> EmptyPane(Icons.Filled.Album, stringResource(R.string.search_empty))
+                // Reaching here means the fetch finished with no album and no
+                // error, which used to render the generic search placeholder and
+                // told the user nothing. Say what actually happened instead.
+                else -> EmptyPane(
+                    icon = Icons.Filled.Album,
+                    text = stringResource(R.string.album_unavailable),
+                )
             }
         }
     }
@@ -136,6 +143,38 @@ private fun AlbumContent(album: com.qbdlx.mobile.api.Album, vm: AppViewModel) {
                 onPlay = { vm.playTracks(tracks, index, album) },
                 onDownload = { vm.downloadTrack(track) },
             )
+        }
+
+        // An album that loaded but has no tracks used to render nothing at all,
+        // which looks identical to a broken screen. Explain it instead.
+        if (tracks.isEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        Icons.Filled.Album,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = stringResource(R.string.album_no_tracks),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.album_no_tracks_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
         }
     }
 }

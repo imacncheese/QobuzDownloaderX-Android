@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0
+
+### Fixed
+
+- **Tapping an album showed an empty screen.** `openAlbum` was defined but never called — the
+  `LaunchedEffect` that triggered the fetch was lost when navigation was rewritten for the animated
+  transitions. The album id changed and the screen opened, but no request was ever made. Loaders are
+  now driven by the navigation target, so every detail screen also works after process death and from
+  a restored back stack, not only on a fresh tap.
+- **Tapping a track did nothing.** `TrackRow` had no play action at all — only download. Tapping now
+  plays and queues the visible results.
+- **Album pagination stopped early when Qobuz omitted `total`.** The loop used `all.size < total`,
+  which is immediately false when `total` is absent. It now follows the desktop app's `total == 0`
+  handling and is bounded by a page count rather than an offset.
+- Replaced the album screen's generic "nothing here" fallback with messages that distinguish an
+  unloadable release from one that genuinely has no tracks.
+
+### Added
+
+- **Artist screen** listing an artist's releases; tapping a release opens it.
+- **Playlist screen** listing its tracks, with Play all and Download playlist.
+
+### Changed
+
+- Detail navigation is a single typed target (album / artist / playlist) rather than a bare album id.
+  That typing is what exposed two screens being reachable without their loaders wired up.
+
 ## 1.2.0
 
 ### Added
