@@ -2,4 +2,11 @@
 <resources>
     <color name="qbdlx_background">#FF0E0B14</color>
     <color name="qbdlx_primary">#FF6C4CF1</color>
+
+    <!--
+      Opaque window background, sitting behind the Compose content. The Compose
+      background role is transparent under the glass treatment, so this is what
+      fills the window edges and prevents a white flash on launch.
+    -->
+    <color name="qbdlx_window_background">#FFFDF8FF</color>
 </resources>

@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +18,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -58,6 +61,7 @@ import com.qbdlx.mobile.settings.TintSource
 import com.qbdlx.mobile.ui.components.FullPlayer
 import com.qbdlx.mobile.ui.components.MiniPlayerBar
 import com.qbdlx.mobile.ui.theme.QobuzDlxTheme
+import com.qbdlx.mobile.ui.theme.ThemeMode
 import com.qbdlx.mobile.ui.theme.TintBackdrop
 import com.qbdlx.mobile.ui.theme.rememberArtworkAccent
 
@@ -71,6 +75,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A placeholder edge-to-edge call; the real system bar styling is applied
+        // from inside the composition once the resolved theme is known, because
+        // the icon tint has to match the in-app theme rather than the device's.
         enableEdgeToEdge()
         askForNotificationPermission()
 
@@ -78,6 +85,35 @@ class MainActivity : ComponentActivity() {
             // The theme wraps the whole tree, including the login screen, so the
             // chosen preset applies everywhere rather than only after sign-in.
             val settings by vm.settingsState.collectAsStateWithLifecycle()
+            val systemDark = isSystemInDarkTheme()
+
+            // "Follow system" must actually follow it. This recomposes when the
+            // device switches mode, and re-applies the bar styling to match.
+            val dark = when (settings.themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.DARK -> true
+                ThemeMode.LIGHT -> false
+            }
+            LaunchedEffect(dark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (dark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    },
+                    navigationBarStyle = if (dark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    },
+                )
+            }
 
             AppRoot(vm, settings)
         }
@@ -201,6 +237,17 @@ private fun AppContent(
         // Reset the detail view when the user switches tabs.
         LaunchedEffect(tab) { open(null) }
 
+        // Back closes the topmost layer rather than finishing the activity.
+        // Without this, pressing back from an album or the player exited the app
+        // and took all the navigation state with it.
+        BackHandler(enabled = queueOpen || playerExpanded || detail != null) {
+            when {
+                queueOpen -> queueOpen = false
+                playerExpanded -> playerExpanded = false
+                else -> open(null)
+            }
+        }
+
         // The player and the queue take over the screen when open. Written as
         // branches rather than early returns so this stays a single composable.
         if (queueOpen && playback.hasItem) {
@@ -215,6 +262,7 @@ private fun AppContent(
                 onToggleShuffle = vm::toggleShuffle,
                 onCycleRepeat = vm::cycleRepeatMode,
                 onOpenQueue = { queueOpen = true },
+                onDownload = vm::downloadCurrentTrack,
                 onCollapse = { playerExpanded = false },
             )
         } else {
@@ -268,6 +316,7 @@ private fun AppContent(
                                 onTogglePlay = vm::togglePlayPause,
                                 onNext = vm::nextTrack,
                                 onPrevious = vm::previousTrack,
+                                onDownload = vm::downloadCurrentTrack,
                                 onStop = vm::stopPlayback,
                                 onExpand = { playerExpanded = true },
                             )

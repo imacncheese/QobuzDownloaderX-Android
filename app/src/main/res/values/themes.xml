@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      Only the window chrome lives here. All in-app colour comes from Compose
+      (QobuzDlxTheme), so these values exist to stop the window flashing the wrong
+      colour before the first frame and to tint the system bars.
+
+      The window background must be opaque: the Compose background role is
+      transparent under the glass treatment so the artwork backdrop can show
+      through, and this is what sits behind it.
+    -->
     <style name="Theme.QobuzDLX" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">@android:color/white</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/qbdlx_window_background</item>
     </style>
 </resources>

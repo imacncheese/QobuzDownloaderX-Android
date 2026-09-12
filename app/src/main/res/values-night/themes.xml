@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.QobuzDLX" parent="android:Theme.Material.Light.NoActionBar">
+    <!--
+      Night variant. This previously inherited from Theme.Material.Light and set a
+      white window background, which is why the app rendered light even with the
+      device in dark mode. It now inherits a dark parent and uses the dark window
+      colour, so the window matches the Compose theme instead of flashing white.
+    -->
+    <style name="Theme.QobuzDLX" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/qbdlx_window_background</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

@@ -447,6 +447,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         enqueueAndStart(items)
     }
 
+    /**
+     * Downloads the track the player is currently on.
+     *
+     * The playing item may predate this app instance (the queue is rebuilt from
+     * the player after a restart), in which case it carries only the metadata the
+     * player holds. A queued item always has an id, so the download works either
+     * way; richer metadata is fetched when the track list is known.
+     */
+    fun downloadCurrentTrack() {
+        val item = playerController.state.value.current ?: return
+        android.util.Log.i("QbdlxPlayer", "downloadCurrentTrack id=${item.trackId}")
+        // Prefer the full track when the queue still has it, so tags and cover art
+        // come out complete.
+        val known = item.track
+        if (known != null) {
+            enqueueAndStart(listOf(known.toDownloadItem(known.album)))
+            return
+        }
+        enqueueAndStart(
+            listOf(
+                DownloadItem(
+                    trackId = item.trackId,
+                    title = item.title,
+                    artist = item.artist,
+                    albumTitle = item.albumTitle,
+                    albumId = null,
+                    trackNumber = 0,
+                    discNumber = 1,
+                    durationSeconds = item.durationSeconds,
+                    coverUrl = item.artworkUrl,
+                    track = null,
+                    album = null,
+                )
+            )
+        )
+    }
+
     private fun enqueueAndStart(items: List<DownloadItem>) {
         if (items.isEmpty()) return
         DownloadQueue.enqueue(items)

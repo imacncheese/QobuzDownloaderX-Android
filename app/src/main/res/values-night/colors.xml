@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window background matching the Qobuz dark theme. -->
+    <color name="qbdlx_window_background">#FF0E0B14</color>
+</resources>

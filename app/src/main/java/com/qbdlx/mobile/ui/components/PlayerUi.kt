@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -61,6 +62,7 @@ fun MiniPlayerBar(
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onDownload: () -> Unit,
     onStop: () -> Unit,
     onExpand: () -> Unit,
     modifier: Modifier = Modifier,
@@ -136,6 +138,16 @@ fun MiniPlayerBar(
                 IconButton(onClick = onNext, enabled = state.hasNext) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "Next", modifier = Modifier.size(26.dp))
                 }
+                // Download the track that is playing, so a song you liked while
+                // listening does not need to be found again.
+                IconButton(onClick = onDownload, enabled = state.current != null) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = "Download this track",
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 IconButton(onClick = onStop) {
                     Icon(
                         Icons.Filled.Close,
@@ -189,6 +201,7 @@ fun FullPlayer(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onOpenQueue: () -> Unit,
+    onDownload: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val item = state.current
@@ -377,6 +390,13 @@ fun FullPlayer(
                         Icons.AutoMirrored.Filled.QueueMusic,
                         contentDescription = "Queue",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onDownload, enabled = item != null) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = "Download this track",
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
