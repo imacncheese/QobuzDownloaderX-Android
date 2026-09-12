@@ -334,6 +334,54 @@ Two deliberate choices worth knowing:
 A preset declares only a few anchor colours; `ThemePalette` derives the full Material 3 role set from
 them, so a new preset cannot leave roles undefined or light/dark out of step.
 
+## Testing on a device
+
+Wireless ADB is fully automated — there is no IP to remember.
+
+### One-time setup (cable needed once)
+
+```powershell
+pwsh -File scripts/connect-phone.ps1 -Setup
+```
+
+Plug the cable in for this. It switches the phone's ADB daemon to TCP mode, after
+which the cable is not needed again until the phone reboots.
+
+### Then, permanently automatic
+
+```powershell
+pwsh -File scripts/connect-phone.ps1 -RegisterTask
+```
+
+Registers a Windows scheduled task that reconnects at logon and every 5 minutes.
+Remove it with `-UnregisterTask`.
+
+### Ad hoc
+
+```powershell
+pwsh -File scripts/connect-phone.ps1              # connect once
+pwsh -File scripts/connect-phone.ps1 -Watch        # stay resident and reconnect
+```
+
+### How it finds the phone
+
+The script discovers the phone over mDNS (`adb mdns services`), so a new DHCP
+lease is picked up automatically — the address is never hardcoded. It falls back
+to the last known-good address, and to USB if a cable happens to be attached.
+
+**Why `adb tcpip` and not the newer paired TLS connection:** `adb tcpip 5555` needs
+no pairing code, but it does not survive a phone reboot. Developer options →
+Wireless debugging *does* survive reboots; enable it if you would rather not have
+the cable fallback. Windows cannot resolve `.local` mDNS names, so the discovered
+IP:port is used rather than the service name.
+
+Run the on-device suite against the phone over Wi-Fi:
+
+```powershell
+$env:ANDROID_SERIAL = "192.168.4.57:5555"
+./gradlew connectedDebugAndroidTest
+```
+
 ## Legal
 
 Not affiliated with, endorsed by, or approved by Qobuz. The Qobuz name and brand are trademarks of
