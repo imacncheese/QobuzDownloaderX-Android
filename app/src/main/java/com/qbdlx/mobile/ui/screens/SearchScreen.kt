@@ -178,7 +178,6 @@ fun SearchScreen(
                                         vm.playTracks(state.tracks, index)
                                     },
                                     onDownload = { vm.downloadTrack(track) },
-                                    onOpenAlbum = onOpenAlbum,
                                 )
                             }
                             AppViewModel.SearchTab.ARTISTS -> items(state.artists, key = { it.idString ?: it.hashCode().toString() }) { artist ->
@@ -271,11 +270,10 @@ private fun AlbumRow(
 }
 
 @Composable
-private fun TrackRow(
+internal fun TrackRow(
     track: Track,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
-    onOpenAlbum: (String) -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -287,11 +285,11 @@ private fun TrackRow(
     ) {
         CoverArt(artworkUrl(track.album?.image?.thumbnail ?: track.image?.thumbnail), 52.dp)
         Spacer(Modifier.width(12.dp))
-        Column(
-            Modifier
-                .weight(1f)
-                .clickable { track.album?.idString?.let(onOpenAlbum) },
-        ) {
+        // Tapping the text plays the track, like every other track list in the
+        // app. It used to open the album instead, which swallowed most of the
+        // row and made search results look like they could not be played at all.
+        // The Albums tab is one tap away for opening a release.
+        Column(Modifier.weight(1f)) {
             Text(
                 text = track.title ?: "Untitled",
                 style = MaterialTheme.typography.bodyLarge,

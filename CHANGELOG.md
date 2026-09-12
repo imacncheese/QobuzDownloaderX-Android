@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.1
+
+- Tapping a track in the search results plays it. It opened the album instead.
+  The row had a second clickable over the title and subtitle that opened the
+  release, and that hotspot covered most of the row, so the row's own handler
+  almost never fired. Every other track list in the app already played on tap,
+  so search was also the odd one out. Opening an album is still one tap away in
+  the Albums tab.
+- Compose UI tests pull Espresso 3.5.0 transitively, which injects touches
+  through `InputManager.getInstance()`. That method no longer exists on Android
+  17, so every UI test click threw on the phone while passing on an older
+  emulator. Espresso is pinned to 3.7.0 so the new tap test actually runs where
+  it matters.
+
 ## 1.8.0
 
 Synced lyrics, and lyrics embedded in the files you download.
