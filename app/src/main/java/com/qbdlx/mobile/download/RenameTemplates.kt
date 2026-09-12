@@ -16,6 +16,10 @@ object RenameTemplates {
     private val illegal = Regex("""[\\/:*?"<>|\x00-\x1f]""")
     private val multiSpace = Regex("""\s{2,}""")
 
+    private val HOLLOW_PARENS = Regex("""\(\s*\)""")
+    private val HOLLOW_SQUARES = Regex("""\[\s*\]""")
+    private val HOLLOW_BRACES = Regex("""\{\s*\}""")
+
     /** Characters that are illegal in FAT/exFAT paths, plus trailing dots/spaces. */
     fun sanitize(input: String, maxLength: Int = 180): String {
         var s = illegal.replace(input, "_")
@@ -88,15 +92,86 @@ object RenameTemplates {
      * Cleans up the artefacts left behind by empty placeholders, so a template
      * like `%format% %bitdepth%-%samplerate%` with no bit depth collapses to
      * "FLAC" rather than "FLAC -".
+     *
+     * Separators and brackets are then trimmed from the ends, but only brackets
+     * that are genuinely unbalanced. Trimming "anything bracket-like" at each end
+     * stripped a perfectly good trailing `]`, and an earlier version trimmed
+     * different characters at each end, which removed a leading "(" and left its
+     * matching ")" behind - that is how a download with no album produced a folder
+     * named `) [FLAC 24-0.1kHz]`.
      */
     internal fun tidy(input: String): String {
-        var s = multiSpace.replace(input, " ").trim()
-        // Drop separator runs left dangling at either end.
-        s = s.trimStart(' ', '-', '_', '.', ',', '(').trimEnd(' ', '-', '_', '.', ',', '(', ')')
-        // Collapse separator runs that now sit next to each other.
+        // Drop bracket pairs an empty placeholder hollowed out.
+        //
+        // Every closing bracket is escaped. A bare "}" is accepted by the JVM's
+        // regex engine but rejected by the one on Android, which threw
+        // PatternSyntaxException and failed the whole download.
+        val raw = input
+            .replace(HOLLOW_PARENS, "")
+            .replace(HOLLOW_SQUARES, "")
+            .replace(HOLLOW_BRACES, "")
+            .let { multiSpace.replace(it, " ") }
+            .trim()
+
+        if (raw.isEmpty()) return ""
+
+        // Strip a leading run of separators, and a trailing run. Only separators,
+        // never brackets: blindly trimming brackets at the ends is what removed a
+        // valid trailing "]".
+        val separators = charArrayOf(' ', '-', '_', '.', ',')
+        val body = raw.trimStart(*separators).trimEnd(*separators).trim()
+        if (body.isEmpty()) return ""
+
+        // Walk the string tracking bracket depth. Extras are the brackets that
+        // never get closed, so they are what to remove from the ends.
+        var depth = 0
+        for (c in body) {
+            when (c) {
+                '(', '[', '{' -> depth++
+                ')', ']', '}' -> if (depth > 0) depth--
+            }
+        }
+
+        var s = body
+
+        // A leading closer means whatever opened it was also stripped, so the
+        // group is hollow: drop everything up to the character after it.
+        while (s.isNotEmpty() && s.first() in ")]}") {
+            s = s.drop(1).trimStart(*separators)
+        }
+
+        // Loopers to the left of the content have nothing to close. Drop the
+        // leading run, which is what an emptied `(%year%)` leaves behind.
+        while (s.isNotEmpty() && s.first() in "([{") {
+            s = s.drop(1).trimStart(*separators)
+        }
+
+        // Unclosed openers at the tail, after any closers they did have.
+        var guard = 0
+        while (guard++ < 16) {
+            val trailing = s.takeLastWhile { it in ")]}" }
+            val rest = s.dropLast(trailing.length)
+            val opens = rest.takeLastWhile { it in "([{" }
+            if (opens.isEmpty()) {
+                // A closer that is now the last character and has no opener left
+                // means its group was emptied too.
+                if (s.isNotEmpty() && s.last() in ")]}" && !rest.contains('(') &&
+                    !rest.contains('[') && !rest.contains('{')
+                ) {
+                    s = s.dropLast(1).trimEnd(*separators)
+                    continue
+                }
+                break
+            }
+            s = rest.dropLast(opens.length).trimEnd(*separators)
+        }
+
+        s = s.trimStart(*separators).trimEnd(*separators).trim()
+
+        // Collapse separator runs that are now adjacent.
         s = s.replace(Regex("""\s*-\s*-\s*"""), " - ")
-        s = s.replace(Regex("""\s*_\s*_\s*"""), "_")
-        s = s.replace(Regex("""\(\s*\)"""), "")
+            .replace(Regex("""\s*_\s*_\s*"""), "_")
+
         return multiSpace.replace(s, " ").trim()
     }
 
@@ -145,8 +220,14 @@ object RenameTemplates {
             ?.replaceFirstChar { it.uppercase() }
             ?: ""
 
+    /**
+     * Qobuz reports `maximum_sampling_rate` in kHz - 44.1, 96, 192 - which is why
+     * the desktop app appends "kHz" straight onto the raw value. Dividing by 1000
+     * again turned every Hi-Res album into "24-0.1kHz". Anything at or above 1000
+     * can only be Hz, so it is scaled rather than printed as "44100kHz".
+     */
     fun fmtRate(rate: Double): String {
-        val khz = rate / 1000.0
+        val khz = if (rate >= 1000.0) rate / 1000.0 else rate
         return if (khz % 1.0 == 0.0) "${khz.toInt()}kHz" else "%.1fkHz".format(khz)
     }
 

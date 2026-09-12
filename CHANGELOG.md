@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.7.0
+
+New downloads had no cover art and landed in the wrong folder. There were three
+separate causes behind that, and the first two only showed up on a device.
+
+- Sample rate was divided by 1000 twice. Qobuz reports `maximum_sampling_rate`
+  in kHz, which is why the desktop app appends "kHz" straight onto the raw
+  number. A 24/96 release was named `[FLAC 24-0.1kHz]` and the album header read
+  `24-bit / 0.1 kHz`.
+- The folder-name cleanup used a regular expression with a bare `}` in it. The
+  JVM accepts that, Android throws `PatternSyntaxException`, so every download
+  started from the player failed immediately. There is now a device test for the
+  naming templates, because unit tests cannot see this kind of difference.
+- Downloads started from the player had no album. Queue entries for tracks that
+  came from `album/get` carry no album of their own, since the album is the
+  parent of that response rather than a field on each track, so there was
+  nothing to pull artwork from and the file was written under "Unknown Artist".
+  A queue entry without an album is now re-fetched as a full track first. The
+  per-track download button on the album screen had the same hole and now passes
+  the album it is already showing.
+
+Verified on a Pixel 8: both paths now write
+`ARJN, KDS, FIFTY4 & ronn/KALYANI (2025) [FLAC 24-96kHz]/01 - KALYANI.flac` with a
+front-cover PICTURE block and the full tag set.
+
+## 1.6.0
+
+- The app follows the system light and dark setting. It used to keep its own
+  idea of the theme, which is why it stayed light in a dark system.
+- Back navigates inside the app instead of closing it, so search results, an
+  open album and the queue survive a trip to another screen.
+- The full player has a download button.
+
+## 1.5.0
+
+- Translucent, tinted surfaces throughout, with the tint taken from the artwork
+  of the playing album. The window background itself stays opaque: making that
+  role translucent washed the whole app grey.
+
 ## 1.3.0
 
 Fixed two things that were wired up but never called, which is why they looked

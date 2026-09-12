@@ -141,7 +141,7 @@ private fun AlbumContent(album: com.qbdlx.mobile.api.Album, vm: AppViewModel) {
                 isCurrent = isCurrent,
                 isPlaying = isCurrent && playback.isPlaying,
                 onPlay = { vm.playTracks(tracks, index, album) },
-                onDownload = { vm.downloadTrack(track) },
+                onDownload = { vm.downloadTrack(track, album) },
             )
         }
 

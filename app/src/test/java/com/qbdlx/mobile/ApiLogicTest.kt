@@ -7,8 +7,10 @@ import com.qbdlx.mobile.api.Album
 import com.qbdlx.mobile.api.AlbumPage
 import com.qbdlx.mobile.api.ArtistRef
 import com.qbdlx.mobile.api.Track
+import com.qbdlx.mobile.ui.formatBitDepthRate
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,6 +113,49 @@ class ApiLogicTest {
     }
 
     // ------------------------------------------------- album download path
+
+    /**
+     * Tracks listed inside an `album/get` response carry no album of their own,
+     * because the album is the parent of the response rather than a field of each
+     * track. Anything that downloads a track has to pass the album alongside it,
+     * or the file lands under "Unknown Artist" with no embedded cover art. This
+     * test pins the data shape so that assumption stays visible.
+     */
+    @Test
+    fun `tracks inside an album response have no nested album`() {
+        val album = json.decodeFromString<Album>(
+            """
+            {"id":"abc123","title":"KALYANI","tracks_count":1,
+             "maximum_bit_depth":24,"maximum_sampling_rate":96.0,
+             "image":{"large":"https://cdn/cover_max.jpg"},
+             "artist":{"id":1,"name":"ARJN"},
+             "tracks":{"total":1,"items":[
+               {"id":367630427,"title":"KALYANI","track_number":1,
+                "maximum_bit_depth":24,"maximum_sampling_rate":96.0}
+             ]}}
+            """.trimIndent()
+        )
+        val track = album.tracks!!.items.single()
+        assertEquals("album/get tracks must not carry an album", null, track.album)
+        assertEquals("https://cdn/cover_max.jpg", album.image?.large)
+    }
+
+    /**
+     * A track from `track/get` does carry its album, which is what the player
+     * download relies on after re-fetching a queue entry that had none.
+     */
+    @Test
+    fun `a track fetched on its own carries its album`() {
+        val track = json.decodeFromString<Track>(
+            """
+            {"id":367630427,"title":"KALYANI","track_number":1,
+             "album":{"id":"abc123","title":"KALYANI",
+                      "image":{"large":"https://cdn/cover_max.jpg"}}}
+            """.trimIndent()
+        )
+        assertEquals("KALYANI", track.album?.title)
+        assertEquals("https://cdn/cover_max.jpg", track.album?.image?.large)
+    }
 
     /**
      * Downloading straight from the search list needs the album id before the
@@ -217,6 +262,25 @@ class ApiLogicTest {
     }
 
     /**
+     * Regression: Qobuz sends `maximum_sampling_rate` in kHz, so the desktop app
+     * appends "kHz" to the raw number. Dividing by 1000 again named a 24/96 album
+     * folder "FLAC 24-0.1kHz" and showed "24-bit / 0.1 kHz" on the album screen.
+     */
+    @Test
+    fun `sampling rate arrives in kHz and is not scaled twice`() {
+        assertEquals("96kHz", RenameTemplates.fmtRate(96.0))
+        assertEquals("44.1kHz", RenameTemplates.fmtRate(44.1))
+        assertEquals("192kHz", RenameTemplates.fmtRate(192.0))
+        assertEquals("176.4kHz", RenameTemplates.fmtRate(176.4))
+    }
+
+    @Test
+    fun `album spec line shows the real rate`() {
+        assertEquals("24-bit / 96 kHz", formatBitDepthRate(24, 96.0))
+        assertEquals("16-bit / 44.1 kHz", formatBitDepthRate(16, 44.1))
+    }
+
+    /**
      * Regression: album folders were named "FLAC 24-0.0kHz" because the template
      * used only album.maximum_sampling_rate, which Qobuz frequently omits or
      * sends as 0 even for Hi-Res releases. The track value must win.
@@ -252,6 +316,53 @@ class ApiLogicTest {
         assertTrue("must not print a zero rate: '$out'", !out.contains("0.0kHz"))
         assertTrue("must not print a zero depth: '$out'", !out.contains("0-"))
         assertEquals("FLAC", out.trim())
+    }
+
+    /**
+     * Regression: downloading from the player passed an item with no Album, and the
+     * album folder came out as `) [FLAC 24-0.1kHz]` - note the orphaned closing
+     * bracket. tidy() trimmed leading and trailing characters with different sets,
+     * so a leading "(" was removed while the matching ")" survived.
+     */
+    @Test
+    fun `a template with no album does not leave unbalanced brackets`() {
+        val out = RenameTemplates.expand(
+            RenameTemplates.DEFAULT_ALBUM_TEMPLATE,
+            album = null,
+            track = null,
+            formatExt = "flac",
+        )
+        assertFalse("orphaned closing bracket: '$out'", out.contains(')'))
+        assertFalse("orphaned opening bracket: '$out'", out.contains('('))
+        assertFalse("orphaned closing square bracket: '$out'", out.contains(']'))
+        assertFalse("orphaned opening square bracket: '$out'", out.contains('['))
+    }
+
+    @Test
+    fun `nothing leaves a folder name starting with punctuation`() {
+        val out = RenameTemplates.expand(
+            RenameTemplates.DEFAULT_ALBUM_TEMPLATE,
+            album = Album(title = null),
+            track = null,
+            formatExt = "flac",
+        )
+        val first = out.firstOrNull()
+        assertTrue(
+            "folder should not start with '$first' in '$out'",
+            first == null || first.isLetterOrDigit(),
+        )
+    }
+
+    @Test
+    fun `balanced brackets in a real template are preserved`() {
+        // The year part legitimately produces brackets and must not be stripped.
+        val out = RenameTemplates.expand(
+            RenameTemplates.DEFAULT_ALBUM_TEMPLATE,
+            album = album,
+            track = track,
+            formatExt = "flac",
+        )
+        assertEquals("Kind of Blue (Mono) (1959) [FLAC 24-192kHz]", out)
     }
 
     @Test

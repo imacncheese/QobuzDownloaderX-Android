@@ -437,51 +437,71 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _albumDownload.value = AlbumDownloadUi()
     }
 
-    fun downloadTrack(track: Track) {
-        enqueueAndStart(listOf(track.toDownloadItem(track.album)))
+    /**
+     * Queues one track. [album] supplies the release context when the track
+     * itself has none, which is the normal case for tracks listed by
+     * `album/get`: the album is the parent of that response, not a field of each
+     * track inside it.
+     */
+    fun downloadTrack(track: Track, album: Album? = null) {
+        enqueueAndStart(listOf(track.toDownloadItem(track.album ?: album)))
     }
 
     /** Queues a whole list of tracks, used by playlist downloads. */
-    fun downloadTracks(tracks: List<Track>) {
-        val items = tracks.filter { !it.idString.isNullOrBlank() }.map { it.toDownloadItem(it.album) }
+    fun downloadTracks(tracks: List<Track>, album: Album? = null) {
+        val items = tracks.filter { !it.idString.isNullOrBlank() }
+            .map { it.toDownloadItem(it.album ?: album) }
         enqueueAndStart(items)
     }
 
     /**
      * Downloads the track the player is currently on.
      *
-     * The playing item may predate this app instance (the queue is rebuilt from
-     * the player after a restart), in which case it carries only the metadata the
-     * player holds. A queued item always has an id, so the download works either
-     * way; richer metadata is fetched when the track list is known.
+     * A queue entry is only enough to tag and name a download when its track
+     * still carries its album. Tracks that come from `album/get` have no nested
+     * album object, because the album is the parent of the response, so the
+     * entry has artwork but nothing to name the folder or embed. Taking the
+     * queue item at face value produced files under "Unknown Artist" with no
+     * cover art, so anything without an album is re-fetched first.
      */
     fun downloadCurrentTrack() {
         val item = playerController.state.value.current ?: return
-        android.util.Log.i("QbdlxPlayer", "downloadCurrentTrack id=${item.trackId}")
-        // Prefer the full track when the queue still has it, so tags and cover art
-        // come out complete.
-        val known = item.track
-        if (known != null) {
-            enqueueAndStart(listOf(known.toDownloadItem(known.album)))
+        android.util.Log.i(
+            "QbdlxPlayer",
+            "downloadCurrentTrack id=${item.trackId} albumOnTrack=${item.track?.album != null}",
+        )
+
+        // Already have everything: no round trip needed.
+        val complete = item.track?.takeIf { it.album != null }
+        if (complete != null) {
+            enqueueAndStart(listOf(complete.toDownloadItem(complete.album)))
             return
         }
-        enqueueAndStart(
-            listOf(
-                DownloadItem(
-                    trackId = item.trackId,
-                    title = item.title,
-                    artist = item.artist,
-                    albumTitle = item.albumTitle,
-                    albumId = null,
-                    trackNumber = 0,
-                    discNumber = 1,
-                    durationSeconds = item.durationSeconds,
-                    coverUrl = item.artworkUrl,
-                    track = null,
-                    album = null,
-                )
+        if (item.trackId.isBlank()) return
+
+        viewModelScope.launch {
+            val track = try {
+                client.getTrack(item.trackId)
+            } catch (e: Throwable) {
+                android.util.Log.w("QbdlxPlayer", "could not fetch track ${item.trackId}", e)
+                _albumDownload.value = AlbumDownloadUi(error = friendly(e))
+                return@launch
+            }
+            val album = track.album
+            android.util.Log.i(
+                "QbdlxPlayer",
+                "fetched track ${item.trackId} for download: album='${album?.title}' " +
+                    "art=${album?.image?.large != null}",
             )
-        )
+            if (album == null) {
+                // Better to say so than to write "Unknown Artist" into the library.
+                _albumDownload.value = AlbumDownloadUi(
+                    error = "Qobuz returned no album for this track, so it cannot be named or tagged.",
+                )
+                return@launch
+            }
+            enqueueAndStart(listOf(track.toDownloadItem(album)))
+        }
     }
 
     private fun enqueueAndStart(items: List<DownloadItem>) {

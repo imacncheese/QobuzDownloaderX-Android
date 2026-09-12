@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.qbdlx.mobile.download.RenameTemplates
 
 /**
  * Shared bits of presentation logic.
@@ -34,10 +35,9 @@ fun formatBytes(bytes: Long): String = when {
 fun formatBitDepthRate(bitDepth: Int?, sampleRate: Double?): String? {
     if (bitDepth == null && sampleRate == null) return null
     val d = bitDepth?.let { "$it-bit" } ?: ""
-    val r = sampleRate?.let {
-        val khz = it / 1000.0
-        if (khz % 1.0 == 0.0) "${khz.toInt()} kHz" else "%.1f kHz".format(khz)
-    } ?: ""
+    // RenameTemplates owns the kHz conversion; the album screen used to divide by
+    // 1000 on its own, which is how a 96 kHz release displayed as "0.1 kHz".
+    val r = sampleRate?.let { RenameTemplates.fmtRate(it).replace("kHz", " kHz") } ?: ""
     return listOf(d, r).filter { it.isNotBlank() }.joinToString(" / ").ifBlank { null }
 }
 

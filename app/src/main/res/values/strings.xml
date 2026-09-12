@@ -33,7 +33,7 @@
     <string name="search_tab_tracks">Tracks</string>
     <string name="search_tab_artists">Artists</string>
     <string name="search_tab_playlists">Playlists</string>
-    <string name="search_empty">Nothing here yet — search for something above.</string>
+    <string name="search_empty">Nothing here yet. Search for something above.</string>
     <string name="search_no_results">No results for “%1$s”.</string>
 
     <!-- Album -->
