@@ -170,7 +170,10 @@ private fun Unavailable(result: LyricsResult?, onRetry: () -> Unit) {
             text = when (result) {
                 is LyricsResult.Instrumental -> "This track is instrumental"
                 is LyricsResult.Error -> result.message
-                else -> "No lyrics for this track"
+                // Naming the source matters. An empty result is not a broken
+                // feature: it is a community database that does not have this
+                // particular track, and saying so stops it reading as one.
+                else -> "No lyrics for this track on LRCLIB"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

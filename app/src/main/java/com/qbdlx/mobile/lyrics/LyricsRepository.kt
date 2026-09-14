@@ -82,7 +82,11 @@ class LyricsRepository(
         if (title.isBlank()) return LyricsResult.NotFound
 
         val result = withContext(Dispatchers.IO) { lookup(artist, title, album, durationSeconds) }
-        cache[trackId] = result
+
+        // A failure is not an answer. Caching one meant a single blip from the
+        // service stuck to that track for the rest of the session, so every later
+        // look at it said "lyrics unavailable" with no way to retry.
+        if (result !is LyricsResult.Error) cache[trackId] = result
         return result
     }
 
@@ -92,6 +96,8 @@ class LyricsRepository(
         album: String?,
         durationSeconds: Int,
     ): LyricsResult {
+        var failure: Throwable? = null
+
         // The exact-match endpoint is authoritative: it only answers when the
         // names and the duration line up, so a hit needs no second-guessing.
         val exact = runCatching {
@@ -103,7 +109,7 @@ class LyricsRepository(
                     "duration" to durationSeconds.takeIf { it > 0 }?.toString().orEmpty(),
                 )
             )
-        }.getOrElse { return errorFor(it) }
+        }.onFailure { failure = it }.getOrNull()
 
         if (exact != null) {
             val record = runCatching { json.decodeFromString<LrclibRecord>(exact) }.getOrNull()
@@ -111,9 +117,12 @@ class LyricsRepository(
         }
 
         // Nothing exact, so fall back to a search and pick the best candidate.
+        // This runs even when the exact call failed outright: a 5xx on one endpoint
+        // says nothing about the other, and bailing out here is what turned a
+        // momentary blip into "no lyrics" for the rest of the session.
         val searched = runCatching {
             get("/api/search?" + query("artist_name" to artist, "track_name" to title))
-        }.getOrElse { return errorFor(it) }
+        }.onFailure { failure = it }.getOrNull()
 
         val candidates = searched
             ?.let { runCatching { json.decodeFromString<List<LrclibRecord>>(it) }.getOrNull() }
@@ -121,7 +130,25 @@ class LyricsRepository(
 
         val best = chooseBest(candidates, durationSeconds)
         Log.i(TAG, "search '$artist - $title' -> ${candidates.size} candidates, best=${best?.id}")
-        return best?.let { toResult(it) } ?: LyricsResult.NotFound
+        if (best != null) return toResult(best)
+
+        // Last try: a looser query, because the credited artist on a compilation
+        // or a feature is often not the one LRCLIB filed the track under.
+        val loose = runCatching {
+            get("/api/search?" + query("q" to "$title $artist"))
+        }.onFailure { failure = it }.getOrNull()
+
+        val looseBest = chooseBest(
+            loose?.let { runCatching { json.decodeFromString<List<LrclibRecord>>(it) }.getOrNull() }
+                .orEmpty(),
+            durationSeconds,
+        )
+        if (looseBest != null) return toResult(looseBest)
+
+        // Only report a failure if one actually happened. Reaching here with no
+        // candidates means the service answered and simply does not have the
+        // track, which is worth distinguishing from it being unreachable.
+        return failure?.let { errorFor(it) } ?: LyricsResult.NotFound
     }
 
     /**
@@ -135,13 +162,24 @@ class LyricsRepository(
             .header("Accept", "application/json")
             .build()
 
-        http.newCall(request).execute().use { response ->
-            if (response.code == 404) return null
-            if (!response.isSuccessful) {
-                throw LyricsHttpException(response.code, "LRCLIB returned HTTP ${response.code}")
+        // One retry for a server-side failure. The service is community-run and
+        // returns 5xx often enough that a single try loses tracks needlessly.
+        repeat(2) { attempt ->
+            try {
+                http.newCall(request).execute().use { response ->
+                    if (response.code == 404) return null
+                    if (response.isSuccessful) return response.body?.string()
+                    if (response.code < 500 || attempt == 1) {
+                        throw LyricsHttpException(response.code, "LRCLIB returned HTTP ${response.code}")
+                    }
+                    Log.i(TAG, "retrying after HTTP ${response.code}")
+                }
+            } catch (e: java.io.IOException) {
+                if (attempt == 1) throw e
+                Log.i(TAG, "retrying after ${e.javaClass.simpleName}")
             }
-            return response.body?.string()
         }
+        return null
     }
 
     private fun errorFor(e: Throwable): LyricsResult {

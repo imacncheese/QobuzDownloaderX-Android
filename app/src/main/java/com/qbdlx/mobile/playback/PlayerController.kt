@@ -12,6 +12,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.qbdlx.mobile.api.Track
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -128,10 +129,39 @@ class PlayerController(
         }
     }
 
+    /**
+     * Notices the playback service going away.
+     *
+     * A MediaController does not reconnect on its own. Without this the app kept
+     * using a dead controller: commands were applied to its own copy of the
+     * playlist, so the UI showed a queue and a current track while the service
+     * held nothing at all and no sound was ever produced. Nothing in the app
+     * could recover from that except restarting it.
+     */
+    private val controllerListener = object : MediaController.Listener {
+        override fun onDisconnected(controller: MediaController) {
+            Log.w(TAG, "playback service disconnected; will reconnect on the next command")
+            this@PlayerController.controller = null
+            connecting = null
+        }
+    }
+
+    @Volatile
+    private var connecting: CompletableDeferred<MediaController?>? = null
+
     fun connect() {
         if (controller != null) return
+        val pending = connecting
+        if (pending != null && !pending.isCompleted) return
+
+        val deferred = CompletableDeferred<MediaController?>()
+        connecting = deferred
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
+        val future = MediaController.Builder(context, token)
+            // The disconnect listener is a builder option; a MediaController only
+            // takes Player.Listener through addListener.
+            .setListener(controllerListener)
+            .buildAsync()
         future.addListener(
             {
                 runCatching {
@@ -139,15 +169,51 @@ class PlayerController(
                     c.addListener(listener)
                     controller = c
                     publish(c)
-                }.onFailure { Log.w(TAG, "could not connect to playback service", it) }
+                    deferred.complete(c)
+                }.onFailure {
+                    Log.w(TAG, "could not connect to playback service", it)
+                    deferred.complete(null)
+                }
             },
             MoreExecutors.directExecutor(),
         )
     }
 
+    /**
+     * The controller, connecting first if the service is not attached.
+     *
+     * Every command needs a live one: against a dead controller they appear to
+     * work and quietly do nothing, which is how the app ended up believing it was
+     * playing with an empty session behind it.
+     */
+    private suspend fun liveController(): MediaController? {
+        controller?.takeIf { it.isConnected }?.let { return it }
+        controller = null
+        connect()
+        return connecting?.await()
+    }
+
+    /**
+     * The controller, but only while it is genuinely attached.
+     *
+     * A disconnected controller still accepts commands and applies them to its
+     * own copy of the playlist, so a command that silently does nothing looks
+     * exactly like one that worked. Anything that finds it detached starts a
+     * reconnect instead.
+     */
+    private fun activeController(): MediaController? {
+        val c = controller ?: return null
+        if (c.isConnected) return c
+        controller = null
+        connecting = null
+        connect()
+        return null
+    }
+
     fun release() {
         controller?.removeListener(listener)
         controller = null
+        connecting = null
         _state.value = PlaybackState()
     }
 
@@ -156,72 +222,114 @@ class PlayerController(
     /**
      * Replaces the queue and starts playing the track at [startIndex].
      *
-     * Every stream URL is resolved before the playlist is handed over. A media
-     * item with no URI is not playable, and a playlist set from a
-     * MediaController loses the items it cannot resolve: the queue arrived
-     * truncated to whatever had been resolved so far, and the start index was
-     * ignored because the item it pointed at had nothing to play. Resolving
-     * everything first removes both problems, and it means the playlist is never
-     * mutated again afterwards, which is what kept dragging playback around.
+     * Every stream URL is resolved before the playlist is handed over, and only
+     * the tracks that resolved are handed over at all. A media item with no URI
+     * is not playable, and one unplayable item anywhere in a playlist set from a
+     * MediaController is enough to make the session fall back to the first track
+     * and to drop items from the queue. Resolving everything up front is what
+     * makes the requested track actually start, and because the playlist is
+     * complete from the outset it never has to be mutated while playing.
      *
      * The cost is a burst of requests before playback begins.
      */
     suspend fun play(items: List<QueueItem>, startIndex: Int) {
-        val c = controller ?: return
+        val c = liveController() ?: run {
+            _state.update { it.copy(error = "Could not reach the playback service.") }
+            return
+        }
         if (items.isEmpty()) return
 
         val index = startIndex.coerceIn(0, items.lastIndex)
 
-        // Show the tapped track straight away; the resolution below is a round of
+        // Show the tapped track straight away; resolving below is a round of
         // round trips before any sound can start.
         queue = items
         _state.update {
             it.copy(error = null, current = items.getOrNull(index), isBuffering = true)
         }
 
-        // Resolved in small batches rather than all at once: a long playlist
-        // otherwise fires hundreds of requests at the API simultaneously.
-        val resolved = items.chunked(RESOLVE_BATCH).flatMap { batch ->
-            coroutineScope {
-                batch.map { item ->
-                    async {
-                        if (item.streamUrl != null) return@async item
-                        val url = runCatching { resolveStreamUrl(item.trackId) }.getOrNull()
-                        if (url == null) item else item.copy(streamUrl = url)
-                    }
-                }.awaitAll()
+        val resolved = resolveAll(items)
+        if (!currentCoroutineContext().isActive) return
+
+        // Only playable items are handed over. One that could not be resolved has
+        // no URI, and leaving any of those in the playlist makes the session fall
+        // back to the first track again even when the requested one is fine.
+        val playable = resolved.filter { it.streamUrl != null }
+        val dropped = resolved.size - playable.size
+        if (playable.isEmpty()) {
+            _state.update {
+                it.copy(isBuffering = false, error = "Could not get a stream URL for any of these tracks.")
             }
+            return
         }
 
-        if (!currentCoroutineContext().isActive) return
-        queue = resolved
-        val media = resolved.map { it.toMediaItem() }
-        val playable = resolved.count { it.streamUrl != null }
-        Log.i(TAG, "play: '${resolved[index].title}' at $index, $playable of ${resolved.size} resolved")
+        // Keep the requested track playing: if its own URL failed, start at the
+        // nearest track that did resolve, preferring the ones after it.
+        val wanted = resolved[index].trackId
+        val start = playable.indexOfFirst { it.trackId == wanted }
+            .takeIf { it >= 0 }
+            ?: resolved.take(index).count { it.streamUrl != null }.coerceAtMost(playable.lastIndex)
 
-        c.setMediaItems(media, index, 0L)
+        queue = playable
+        val media = playable.map { it.toMediaItem() }
+        Log.i(
+            TAG,
+            "play: '${playable[start].title}' at $start of ${playable.size}" +
+                if (dropped > 0) " ($dropped unavailable)" else "",
+        )
+
+        c.setMediaItems(media, start, 0L)
         c.prepare()
         c.play()
-        _state.update { it.copy(current = resolved.getOrNull(index)) }
+        _state.update { it.copy(current = playable.getOrNull(start), isBuffering = true) }
+    }
+
+    /**
+     * Resolves every item's stream URL, with one retry for the ones that fail.
+     *
+     * Resolved in small batches rather than all at once, so a long playlist does
+     * not fire hundreds of requests at the API simultaneously. The retry matters
+     * because a single failure used to cost the whole queue its start position:
+     * a batch of fifty regularly loses a few to a timeout or a 429.
+     */
+    private suspend fun resolveAll(items: List<QueueItem>): List<QueueItem> {
+        suspend fun pass(batch: List<QueueItem>): List<QueueItem> = coroutineScope {
+            batch.map { item ->
+                async {
+                    if (item.streamUrl != null) return@async item
+                    val url = runCatching { resolveStreamUrl(item.trackId) }.getOrNull()
+                    if (url == null) item else item.copy(streamUrl = url)
+                }
+            }.awaitAll()
+        }
+
+        val first = items.chunked(RESOLVE_BATCH).flatMap { pass(it) }
+        val missing = first.filter { it.streamUrl == null }
+        if (missing.isEmpty()) return first
+
+        Log.i(TAG, "resolve: retrying ${missing.size} track(s)")
+        val retried = missing.chunked(RESOLVE_BATCH).flatMap { pass(it) }
+            .associateBy { it.trackId }
+        return first.map { retried[it.trackId] ?: it }
     }
 
     fun togglePlayPause() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         if (c.isPlaying) c.pause() else c.play()
     }
 
     fun next() {
-        controller?.seekToNextMediaItem()
+        activeController()?.seekToNextMediaItem()
     }
 
     fun previous() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         // Restart the current track unless we are near its beginning.
         if (c.currentPosition > RESTART_THRESHOLD_MS) c.seekTo(0) else c.seekToPreviousMediaItem()
     }
 
     fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs.coerceAtLeast(0L))
+        activeController()?.seekTo(positionMs.coerceAtLeast(0L))
     }
 
     /**
@@ -235,13 +343,13 @@ class PlayerController(
     fun livePositionMs(): Long = controller?.currentPosition?.coerceAtLeast(0L) ?: 0L
 
     fun seekToIndex(index: Int) {
-        val c = controller ?: return
+        val c = activeController() ?: return
         c.seekTo(index, 0L)
         scope.launch { resolveInto(c, index) }
     }
 
     fun stop() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         c.stop()
         c.clearMediaItems()
         queue = emptyList()
@@ -251,7 +359,7 @@ class PlayerController(
     // -------------------------------------------------------- shuffle, repeat
 
     fun toggleShuffle() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         val enabled = !c.shuffleModeEnabled
         c.shuffleModeEnabled = enabled
         // The playing item must not change when shuffle is toggled, which
@@ -267,7 +375,7 @@ class PlayerController(
      * an album, then repeat one for a single track, then off.
      */
     fun cycleRepeat() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         val next = when (c.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
@@ -282,7 +390,7 @@ class PlayerController(
 
     /** Jumps to a position in the queue as the user sees it. */
     fun jumpTo(index: Int) {
-        val c = controller ?: return
+        val c = activeController() ?: return
         if (index !in 0 until c.mediaItemCount) return
         c.seekTo(index, 0L)
         scope.launch { resolveInto(c, index) }
@@ -296,7 +404,7 @@ class PlayerController(
      * explicit seek is needed.
      */
     fun moveInQueue(from: Int, to: Int) {
-        val c = controller ?: return
+        val c = activeController() ?: return
         if (from !in 0 until c.mediaItemCount) return
         val target = to.coerceIn(0, c.mediaItemCount - 1)
         if (from == target) return
@@ -305,7 +413,7 @@ class PlayerController(
     }
 
     fun removeFromQueue(index: Int) {
-        val c = controller ?: return
+        val c = activeController() ?: return
         if (index !in 0 until c.mediaItemCount) return
         // Removing the last remaining item clears the player.
         c.removeMediaItem(index)
@@ -314,7 +422,7 @@ class PlayerController(
 
     /** Drops everything after the current track. */
     fun clearUpcoming() {
-        val c = controller ?: return
+        val c = activeController() ?: return
         val from = c.currentMediaItemIndex + 1
         if (from < c.mediaItemCount) c.removeMediaItems(from, c.mediaItemCount)
         publish(c)

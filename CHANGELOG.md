@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.9.1
+
+Lyrics fixes, and playback now recovers when the service goes away.
+
+### Lyrics
+
+Two real faults, both found by checking what the app actually did rather than
+what it was supposed to do.
+
+- A failure from the lyrics service was cached like an answer. One bad moment,
+  a 503 or a dropped connection, stuck to that track for the rest of the session
+  and every later look at it said the lyrics were unavailable with no way to
+  retry. Failures are no longer remembered.
+- A failure on the exact-match endpoint aborted the whole lookup instead of
+  falling through to the search endpoint. A 503 on one says nothing about the
+  other. It now carries on, retries a server-side failure once, and makes one
+  looser query before giving up, because the credited artist on a compilation or
+  a feature is often not the one the track is filed under.
+
+The message when there is nothing now names the source, "No lyrics for this
+track on LRCLIB". An empty result is not a broken feature, it is a community
+database that does not have that particular track, and the old wording made it
+read like one.
+
+I also tried adding a second lyrics source for tracks LRCLIB does not have.
+Every free one I could find is unusable: one is gone, one rate limits the shared
+instance, one now needs a key. None of it is in the app.
+
+### Playback
+
+A MediaController does not reconnect on its own, and the app never noticed the
+playback service going away. It kept issuing commands to a dead controller,
+which accepts them and applies them to its own copy of the playlist, so the app
+happily showed a queue and a current track while the service held nothing and no
+sound was produced. The only way out was restarting the app. Disconnection is
+handled now, and every command either finds a live controller or starts a
+reconnect.
+
+Stream URLs are also retried once, and only tracks that actually resolved are
+handed to the player. One unplayable item anywhere in a playlist set from a
+controller is enough to make it fall back to the first track again, which is why
+a queue of fifty that lost four URLs still started on the wrong one.
+
 ## 1.9.0
 
 Smoother throughout, and playback no longer loses the queue.
