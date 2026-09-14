@@ -142,6 +142,8 @@ fun SearchScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        // Rows animate in and out as results change, so a new
+                        // search does not snap the list from one set to another.
                         when (state.tab) {
                             AppViewModel.SearchTab.ALBUMS -> items(state.albums, key = { it.idString ?: it.hashCode().toString() }) { album ->
                                 AlbumRow(
@@ -167,6 +169,7 @@ fun SearchScreen(
                                         }
                                     },
                                     onDownload = { album.idString?.let(vm::downloadAlbumById) },
+                                    modifier = Modifier.animateItem(),
                                 )
                             }
                             AppViewModel.SearchTab.TRACKS -> itemsIndexed(state.tracks, key = { _, t -> t.idString ?: t.hashCode().toString() }) { index, track ->
@@ -178,15 +181,17 @@ fun SearchScreen(
                                         vm.playTracks(state.tracks, index)
                                     },
                                     onDownload = { vm.downloadTrack(track) },
+                                    modifier = Modifier.animateItem(),
                                 )
                             }
                             AppViewModel.SearchTab.ARTISTS -> items(state.artists, key = { it.idString ?: it.hashCode().toString() }) { artist ->
-                                ArtistRow(artist) { artist.idString?.let(onOpenArtist) }
+                                ArtistRow(artist, modifier = Modifier.animateItem()) { artist.idString?.let(onOpenArtist) }
                             }
                             AppViewModel.SearchTab.PLAYLISTS -> items(state.playlists, key = { it.idString ?: it.hashCode().toString() }) { playlist ->
                                 PlaylistRow(
                                     playlist = playlist,
                                     onOpen = { playlist.idString?.let(onOpenPlaylist) },
+                                    modifier = Modifier.animateItem(),
                                 )
                             }
                         }
@@ -222,9 +227,10 @@ private fun AlbumRow(
     busy: Boolean,
     onOpen: () -> Unit,
     onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onOpen)
@@ -274,9 +280,10 @@ internal fun TrackRow(
     track: Track,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(LocalShapes.current.card)
             .clickable(onClick = onPlay)
@@ -319,9 +326,13 @@ internal fun TrackRow(
 }
 
 @Composable
-private fun ArtistRow(artist: Artist, onOpen: () -> Unit) {
+private fun ArtistRow(
+    artist: Artist,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit,
+) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(LocalShapes.current.card)
             .clickable(onClick = onOpen)
@@ -357,12 +368,13 @@ private fun ArtistRow(artist: Artist, onOpen: () -> Unit) {
 private fun PlaylistRow(
     playlist: com.qbdlx.mobile.api.Playlist,
     onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val cover = playlist.images.firstOrNull()
         ?: playlist.image_rectangle.firstOrNull()
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(LocalShapes.current.card)
             .clickable(onClick = onOpen)

@@ -672,7 +672,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .takeIf { it >= 0 } ?: 0
 
         val items = usable.map { t -> t.toQueueItem(t.album ?: album) }
-        playerController.play(items, start)
+        // play() resolves the queue's stream URLs before handing it to the player,
+        // so it does its work off the main thread.
+        viewModelScope.launch { playerController.play(items, start) }
     }
 
     fun togglePlayPause() = playerController.togglePlayPause()

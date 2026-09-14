@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.9.0
+
+Smoother throughout, and playback no longer loses the queue.
+
+### Playback
+
+Starting a track used to leave the queue holding only the few tracks that had
+been resolved so far, so next and previous ran out after two or three. The cause
+turned out to be the same one behind the wrong-track bug: a media item with no
+stream URL is not playable, and a playlist handed to a MediaController silently
+drops the items it cannot resolve. Every stream URL is now resolved before the
+queue is handed over, in small batches so a long playlist does not fire hundreds
+of requests at once. The player then gets a complete, playable queue and starts
+on the track that was asked for.
+
+The trade-off is a short wait before the first track starts, which grows with the
+length of the queue. The player shows its buffering state while that happens.
+
+### Animation
+
+- The player and the queue slide in over the list instead of replacing it, and
+  the list fades out underneath. Because the list stays composed, its scroll
+  position and a half-typed search now survive a trip to the player.
+- The mini player slides up when something starts playing.
+- Switching tabs crossfades rather than cutting.
+- Tapping a lyric line or moving a queue row animates; search results animate in
+  and out as they change.
+- The artwork and the lyrics panel crossfade instead of swapping.
+
+### Stability
+
+- The app no longer redraws itself on every playback tick. The position updates
+  about once a second and the whole tree, theme and backdrop included, used to
+  recompose with it. Only the tint, the mini player and the player read the
+  playback state now, and only the parts of it they need.
+- The queue shown in the app can no longer end up shorter than the player's. The
+  queue screen passes row positions straight back to the player, so a short list
+  meant removing, moving or jumping to the wrong track.
+- A tap that misses the player's controls can no longer reach the list underneath
+  it and start another track.
+
 ## 1.8.1
 
 - Tapping a track in the search results plays it. It opened the album instead.

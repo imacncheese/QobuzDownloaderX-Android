@@ -1,5 +1,7 @@
 package com.qbdlx.mobile.ui.components
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -251,26 +253,33 @@ fun FullPlayer(
 
             // The lyrics panel takes over the artwork's slot rather than pushing
             // it out of the way, so toggling it does not move the transport
-            // controls out from under the user's thumb.
+            // controls out from under the user's thumb. Crossfading rather than
+            // swapping keeps the square from flashing empty in between.
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.86f)
                     .aspectRatio(1f),
             ) {
-                if (lyrics.visible) {
-                    LyricsPanel(
-                        state = lyrics,
-                        positionMs = lyricsPositionMs,
-                        onSeek = onSeek,
-                        onRetry = onReloadLyrics,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    FilledCoverArt(
-                        url = item?.artworkUrl,
-                        shape = shapes.artworkLarge,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                Crossfade(
+                    targetState = lyrics.visible,
+                    animationSpec = tween(260),
+                    label = "artworkOrLyrics",
+                ) { showLyrics ->
+                    if (showLyrics) {
+                        LyricsPanel(
+                            state = lyrics,
+                            positionMs = lyricsPositionMs,
+                            onSeek = onSeek,
+                            onRetry = onReloadLyrics,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        FilledCoverArt(
+                            url = item?.artworkUrl,
+                            shape = shapes.artworkLarge,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
 

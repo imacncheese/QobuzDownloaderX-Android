@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,13 +98,26 @@ fun QueueScreen(
                 return@Box
             }
 
+            // Keys have to be stable across a reorder for the list to animate a
+            // move rather than treat the row as a new one. A track can legitimately
+            // appear twice in a queue, so duplicates get a suffix; otherwise the
+            // key would clash and the list would throw.
+            val keys = remember(state.queue) {
+                val seen = HashMap<String, Int>()
+                state.queue.map { item ->
+                    val n = seen.getOrDefault(item.trackId, 0)
+                    seen[item.trackId] = n + 1
+                    if (n == 0) item.trackId else "${item.trackId}#$n"
+                }
+            }
+
             LazyColumn(
                 contentPadding = PaddingValues(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 itemsIndexed(
                     state.queue,
-                    key = { index, item -> "${item.trackId}-$index" },
+                    key = { index, _ -> keys.getOrElse(index) { index.toString() } },
                 ) { index, item ->
                     val isCurrent = index == state.queueIndex
                     QueueRow(
@@ -119,6 +133,7 @@ fun QueueScreen(
                         onMoveUp = { vm.moveQueueItem(index, index - 1) },
                         onMoveDown = { vm.moveQueueItem(index, index + 1) },
                         onRemove = { vm.removeQueueItem(index) },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
@@ -140,9 +155,10 @@ private fun QueueRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .clip(LocalShapes.current.card)

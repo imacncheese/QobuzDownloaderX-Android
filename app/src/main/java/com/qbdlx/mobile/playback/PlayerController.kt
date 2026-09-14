@@ -12,6 +12,11 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.qbdlx.mobile.api.Track
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -106,6 +111,9 @@ class PlayerController(
      */
     private val resolving = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
+    /** How many stream URLs to resolve at once when a queue is opened. */
+    private val RESOLVE_BATCH = 8
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publish(player)
@@ -148,39 +156,53 @@ class PlayerController(
     /**
      * Replaces the queue and starts playing the track at [startIndex].
      *
-     * The queue is rotated so the requested track is first, rather than being
-     * passed a start index. `MediaController.setMediaItems(items, startIndex, 0)`
-     * does not work here: the start index is applied to the controller's own
-     * copy of the playlist, then discarded when the session's real state arrives,
-     * leaving playback on the first track. Every corrective seek afterwards was
-     * discarded the same way. `setMediaItems(items)` without a start index does
-     * work, and always begins at the first item of the list it is given, so that
-     * is what is handed to it.
+     * Every stream URL is resolved before the playlist is handed over. A media
+     * item with no URI is not playable, and a playlist set from a
+     * MediaController loses the items it cannot resolve: the queue arrived
+     * truncated to whatever had been resolved so far, and the start index was
+     * ignored because the item it pointed at had nothing to play. Resolving
+     * everything first removes both problems, and it means the playlist is never
+     * mutated again afterwards, which is what kept dragging playback around.
      *
-     * The trade-off is that the queue runs from the tapped track to the end of
-     * the list and then wraps to the start, instead of keeping the list order.
+     * The cost is a burst of requests before playback begins.
      */
-    fun play(items: List<QueueItem>, startIndex: Int) {
+    suspend fun play(items: List<QueueItem>, startIndex: Int) {
         val c = controller ?: return
         if (items.isEmpty()) return
 
         val index = startIndex.coerceIn(0, items.lastIndex)
-        val rotated = items.drop(index) + items.take(index)
 
-        queue = rotated
+        // Show the tapped track straight away; the resolution below is a round of
+        // round trips before any sound can start.
+        queue = items
         _state.update {
-            it.copy(error = null, current = rotated.firstOrNull(), isBuffering = true)
+            it.copy(error = null, current = items.getOrNull(index), isBuffering = true)
         }
 
-        val media = rotated.map { it.toMediaItem() }
-        Log.i(TAG, "play: '${rotated.first().title}' then ${rotated.size - 1} more")
-        // No start index argument: that is the form that works. Handing
-        // setMediaItems a start index makes the whole command land wrong.
-        c.setMediaItems(media)
+        // Resolved in small batches rather than all at once: a long playlist
+        // otherwise fires hundreds of requests at the API simultaneously.
+        val resolved = items.chunked(RESOLVE_BATCH).flatMap { batch ->
+            coroutineScope {
+                batch.map { item ->
+                    async {
+                        if (item.streamUrl != null) return@async item
+                        val url = runCatching { resolveStreamUrl(item.trackId) }.getOrNull()
+                        if (url == null) item else item.copy(streamUrl = url)
+                    }
+                }.awaitAll()
+            }
+        }
+
+        if (!currentCoroutineContext().isActive) return
+        queue = resolved
+        val media = resolved.map { it.toMediaItem() }
+        val playable = resolved.count { it.streamUrl != null }
+        Log.i(TAG, "play: '${resolved[index].title}' at $index, $playable of ${resolved.size} resolved")
+
+        c.setMediaItems(media, index, 0L)
         c.prepare()
         c.play()
-
-        preResolveUpcoming(c)
+        _state.update { it.copy(current = resolved.getOrNull(index)) }
     }
 
     fun togglePlayPause() {
@@ -387,9 +409,24 @@ class PlayerController(
         // a shuffle or a reorder the player's order is the truth, and after an app
         // restart our list is empty while the service is still playing. Metadata is
         // reconstructed from each item where the local list has no entry.
-        val ordered = (0 until player.mediaItemCount).mapNotNull { i ->
+        //
+        // Every position is kept, even when an item carries nothing to describe it
+        // by. Dropping one would make this list shorter than the player's, and the
+        // queue screen passes its row indices straight back to the player, so a
+        // short list means removing, moving or jumping to the wrong track.
+        val ordered = (0 until player.mediaItemCount).map { i ->
             val item = player.getMediaItemAt(i)
-            queue.firstOrNull { it.trackId == item.mediaId } ?: item.toQueueItem()
+            queue.firstOrNull { it.trackId == item.mediaId }
+                ?: item.toQueueItem()
+                ?: QueueItem(
+                    trackId = item.mediaId,
+                    title = item.mediaMetadata.title?.toString().orEmpty().ifBlank { "Untitled" },
+                    artist = item.mediaMetadata.artist?.toString().orEmpty(),
+                    albumTitle = item.mediaMetadata.albumTitle?.toString().orEmpty(),
+                    artworkUrl = item.mediaMetadata.artworkUri?.toString(),
+                    durationSeconds = 0,
+                    track = null,
+                )
         }
 
         _state.update {
@@ -439,7 +476,7 @@ class PlayerController(
         val durationSeconds: Int,
     )
 
-    /** Rebuilds a [QueueItem] from a player media item. */
+    /** Rebuilds a [QueueItem] from a player media item, or null if it has no id. */
     private fun MediaItem.toQueueItem(): QueueItem? {
         if (mediaId.isBlank()) return null
         val tag = localConfiguration?.tag as? QueueTag

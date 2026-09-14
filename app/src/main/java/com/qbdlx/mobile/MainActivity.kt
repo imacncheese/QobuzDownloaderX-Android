@@ -12,11 +12,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -42,10 +46,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import com.qbdlx.mobile.lyrics.LyricsUi
 import com.qbdlx.mobile.ui.AppViewModel
 import com.qbdlx.mobile.ui.artworkUrl
 import com.qbdlx.mobile.ui.screens.AlbumScreen
@@ -172,13 +181,18 @@ private fun detailFromKey(key: String?): DetailTarget? {
 private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
     val session by vm.signedIn.collectAsStateWithLifecycle()
     val albumState by vm.album.collectAsStateWithLifecycle()
-    val playback by vm.playback.collectAsStateWithLifecycle()
+
+    // Only the artwork of the playing track is needed up here, for the tint.
+    // Collecting the whole playback state would recompose the entire app, theme
+    // and backdrop included, on every position tick.
+    val playingArtwork by remember(vm) {
+        vm.playback.map { it.current?.artworkUrl }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     val openAlbumArtwork = artworkUrl(
         albumState.album?.image?.large ?: albumState.album?.image?.small,
         size = 300,
     )
-    val playingArtwork = playback.current?.artworkUrl
 
     // The tint follows whichever source the user picked. Now-playing takes
     // priority so the colour moves with the music as the queue advances, rather
@@ -210,22 +224,25 @@ private fun AppRoot(vm: AppViewModel, settings: SettingsStore.Settings) {
             if (session == null) {
                 LoginScreen(vm)
             } else {
-                AppContent(vm, playback)
+                AppContent(vm)
             }
         }
     }
 }
 
 @Composable
-private fun AppContent(
-    vm: AppViewModel,
-    playback: com.qbdlx.mobile.playback.PlaybackState,
-) {
+private fun AppContent(vm: AppViewModel) {
         val lyricsState by vm.lyrics.collectAsStateWithLifecycle()
         var tab by rememberSaveable { mutableStateOf(Tab.SEARCH) }
         var detailKey by rememberSaveable { mutableStateOf<String?>(null) }
         var playerExpanded by rememberSaveable { mutableStateOf(false) }
         var queueOpen by rememberSaveable { mutableStateOf(false) }
+
+        // Only whether something is playing, not the position, so the shell is
+        // not recomposed once a second while music plays.
+        val hasItem by remember(vm) {
+            vm.playback.map { it.hasItem }.distinctUntilChanged()
+        }.collectAsStateWithLifecycle(initialValue = false)
 
         val detail = detailFromKey(detailKey)
         fun open(target: DetailTarget?) { detailKey = target?.toKey() }
@@ -249,109 +266,219 @@ private fun AppContent(
             }
         }
 
-        // The player and the queue take over the screen when open. Written as
-        // branches rather than early returns so this stays a single composable.
-        if (queueOpen && playback.hasItem) {
-            QueueScreen(vm, onBack = { queueOpen = false })
-        } else if (playerExpanded && playback.hasItem) {
-            FullPlayer(
-                state = playback,
-                lyrics = lyricsState,
-                lyricsPositionMs = vm.lyricsPositionMs,
-                onTogglePlay = vm::togglePlayPause,
-                onNext = vm::nextTrack,
-                onPrevious = vm::previousTrack,
-                onSeek = vm::seekTo,
-                onToggleShuffle = vm::toggleShuffle,
-                onCycleRepeat = vm::cycleRepeatMode,
-                onOpenQueue = { queueOpen = true },
-                onDownload = vm::downloadCurrentTrack,
-                onToggleLyrics = vm::toggleLyrics,
-                onReloadLyrics = vm::reloadLyrics,
-                onCollapse = { playerExpanded = false },
-            )
-        } else {
+        // The player and the queue slide in over the list instead of replacing it.
+        // Keeping the list composed underneath means its scroll position and any
+        // half-typed search survive a trip to the player, which used to reset them
+        // because the whole screen was removed and rebuilt.
+        //
+        // Two things have to be handled because the list is still there: it is
+        // faded out while a layer covers it (the glass theme's background is
+        // deliberately transparent, so otherwise it would show through), and a
+        // blocker sits between the two so a tap that misses the player's own
+        // controls cannot land on a row underneath and start another track.
+        val overlayOpen = (playerExpanded && hasItem) || (queueOpen && hasItem)
+        val contentAlpha by animateFloatAsState(
+            targetValue = if (overlayOpen) 0f else 1f,
+            animationSpec = tween(260),
+            label = "contentAlpha",
+        )
+
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentAlpha }) {
             AnimatedContent(
-            targetState = detail,
-            transitionSpec = {
-                // Slide the detail view in over the list, and back out on close.
-                val forward = targetState != null
-                val offset = if (forward) { full: Int -> full / 6 } else { full: Int -> -full / 6 }
-                (slideInHorizontally(animationSpec = tween(280)) { offset(it) } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(animationSpec = tween(280)) { -offset(it) } + fadeOut(tween(160)))
-            },
-            label = "detail",
-        ) { target ->
-            if (target != null) {
-                // Each loader is triggered here rather than on tap, so the screens
-                // also work after process death or from a restored back stack. This
-                // is what was missing when tapping an album showed an empty screen.
-                when (target) {
-                    is DetailTarget.Album -> {
-                        LaunchedEffect(target.id) { vm.openAlbum(target.id) }
-                        AlbumScreen(vm, onBack = { open(null) })
-                    }
+                targetState = detail,
+                transitionSpec = {
+                    // Slide the detail view in over the list, and back out on close.
+                    val forward = targetState != null
+                    val offset = if (forward) { full: Int -> full / 6 } else { full: Int -> -full / 6 }
+                    (slideInHorizontally(animationSpec = tween(280)) { offset(it) } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(animationSpec = tween(280)) { -offset(it) } + fadeOut(tween(160)))
+                },
+                label = "detail",
+            ) { target ->
+                if (target != null) {
+                    // Each loader is triggered here rather than on tap, so the screens
+                    // also work after process death or from a restored back stack. This
+                    // is what was missing when tapping an album showed an empty screen.
+                    when (target) {
+                        is DetailTarget.Album -> {
+                            LaunchedEffect(target.id) { vm.openAlbum(target.id) }
+                            AlbumScreen(vm, onBack = { open(null) })
+                        }
 
-                    is DetailTarget.Artist -> {
-                        LaunchedEffect(target.id) { vm.openArtist(target.id) }
-                        ArtistScreen(
-                            vm = vm,
-                            onBack = { open(null) },
-                            onOpenAlbum = { open(DetailTarget.Album(it)) },
-                        )
-                    }
-
-                    is DetailTarget.Playlist -> {
-                        LaunchedEffect(target.id) { vm.openPlaylist(target.id) }
-                        PlaylistScreen(vm, onBack = { open(null) })
-                    }
-                }
-            } else {
-                Scaffold(
-                    // Transparent so the tinted artwork backdrop behind the
-                    // Scaffold is visible; the window itself paints the base
-                    // colour, so nothing shows through to the launcher.
-                    containerColor = Color.Transparent,
-                    bottomBar = {
-                        Column {
-                            // Mini player rides above the navigation bar so it is
-                            // reachable from every tab.
-                            MiniPlayerBar(
-                                state = playback,
-                                onTogglePlay = vm::togglePlayPause,
-                                onNext = vm::nextTrack,
-                                onPrevious = vm::previousTrack,
-                                onDownload = vm::downloadCurrentTrack,
-                                onStop = vm::stopPlayback,
-                                onExpand = { playerExpanded = true },
+                        is DetailTarget.Artist -> {
+                            LaunchedEffect(target.id) { vm.openArtist(target.id) }
+                            ArtistScreen(
+                                vm = vm,
+                                onBack = { open(null) },
+                                onOpenAlbum = { open(DetailTarget.Album(it)) },
                             )
-                            NavigationBar {
-                                Tab.entries.forEach { t ->
-                                    NavigationBarItem(
-                                        selected = tab == t,
-                                        onClick = { tab = t },
-                                        icon = { Icon(t.icon, contentDescription = null) },
-                                        label = { Text(stringResource(t.labelRes)) },
-                                    )
+                        }
+
+                        is DetailTarget.Playlist -> {
+                            LaunchedEffect(target.id) { vm.openPlaylist(target.id) }
+                            PlaylistScreen(vm, onBack = { open(null) })
+                        }
+                    }
+                } else {
+                    MainTabs(
+                        vm = vm,
+                        tab = tab,
+                        onSelectTab = { tab = it },
+                        onOpenDetail = { open(it) },
+                        onExpandPlayer = { playerExpanded = true },
+                    )
+                }
+            }
+            }
+
+            if (overlayOpen) {
+                // Swallows anything the layer above does not handle itself.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent().changes.forEach { it.consume() }
                                 }
                             }
-                        }
-                    },
-                ) { padding ->
-                    Box(Modifier.fillMaxSize().padding(padding)) {
-                        when (tab) {
-                            Tab.SEARCH -> SearchScreen(
-                                vm = vm,
-                                onOpenAlbum = { open(DetailTarget.Album(it)) },
-                                onOpenArtist = { open(DetailTarget.Artist(it)) },
-                                onOpenPlaylist = { open(DetailTarget.Playlist(it)) },
-                            )
-                            Tab.DOWNLOADS -> DownloadsScreen(vm)
-                            Tab.SETTINGS -> SettingsScreen(vm)
-                        }
+                        },
+                )
+            }
+
+            AnimatedVisibility(
+                visible = playerExpanded && hasItem,
+                enter = slideInVertically(tween(320)) { it } + fadeIn(tween(200)),
+                exit = slideOutVertically(tween(280)) { it } + fadeOut(tween(180)),
+                label = "player",
+            ) {
+                FullPlayerHost(
+                    vm = vm,
+                    lyrics = lyricsState,
+                    onOpenQueue = { queueOpen = true },
+                    onCollapse = { playerExpanded = false },
+                )
+            }
+
+            AnimatedVisibility(
+                visible = queueOpen && hasItem,
+                enter = slideInHorizontally(tween(300)) { it } + fadeIn(tween(200)),
+                exit = slideOutHorizontally(tween(260)) { it } + fadeOut(tween(180)),
+                label = "queue",
+            ) {
+                QueueScreen(vm, onBack = { queueOpen = false })
+            }
+        }
+}
+
+/**
+ * The tab screens and their chrome.
+ *
+ * Split out so the playback state is only collected by the mini player, rather
+ * than by everything above it.
+ */
+@Composable
+private fun MainTabs(
+    vm: AppViewModel,
+    tab: Tab,
+    onSelectTab: (Tab) -> Unit,
+    onOpenDetail: (DetailTarget) -> Unit,
+    onExpandPlayer: () -> Unit,
+) {
+    Scaffold(
+        // Transparent so the tinted artwork backdrop behind the
+        // Scaffold is visible; the window itself paints the base
+        // colour, so nothing shows through to the launcher.
+        containerColor = Color.Transparent,
+        bottomBar = {
+            Column {
+                // Mini player rides above the navigation bar so it is
+                // reachable from every tab.
+                MiniPlayerHost(vm = vm, onExpand = onExpandPlayer)
+                NavigationBar {
+                    Tab.entries.forEach { t ->
+                        NavigationBarItem(
+                            selected = tab == t,
+                            onClick = { onSelectTab(t) },
+                            icon = { Icon(t.icon, contentDescription = null) },
+                            label = { Text(stringResource(t.labelRes)) },
+                        )
                     }
+                }
+            }
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            // Crossfade rather than cut, so switching tabs reads as a change of
+            // place instead of a flash.
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) },
+                label = "tab",
+            ) { current ->
+                when (current) {
+                    Tab.SEARCH -> SearchScreen(
+                        vm = vm,
+                        onOpenAlbum = { onOpenDetail(DetailTarget.Album(it)) },
+                        onOpenArtist = { onOpenDetail(DetailTarget.Artist(it)) },
+                        onOpenPlaylist = { onOpenDetail(DetailTarget.Playlist(it)) },
+                    )
+                    Tab.DOWNLOADS -> DownloadsScreen(vm)
+                    Tab.SETTINGS -> SettingsScreen(vm)
                 }
             }
         }
     }
+}
+
+/** Collects the playback state for the mini player only. */
+@Composable
+private fun MiniPlayerHost(vm: AppViewModel, onExpand: () -> Unit) {
+    val playback by vm.playback.collectAsStateWithLifecycle()
+
+    // Slide in and out rather than appearing abruptly above the nav bar.
+    AnimatedVisibility(
+        visible = playback.hasItem,
+        enter = slideInVertically(tween(260)) { it } + fadeIn(tween(180)),
+        exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(140)),
+        label = "miniPlayer",
+    ) {
+        MiniPlayerBar(
+            state = playback,
+            onTogglePlay = vm::togglePlayPause,
+            onNext = vm::nextTrack,
+            onPrevious = vm::previousTrack,
+            onDownload = vm::downloadCurrentTrack,
+            onStop = vm::stopPlayback,
+            onExpand = onExpand,
+        )
+    }
+}
+
+/** Collects the playback state for the full player only. */
+@Composable
+private fun FullPlayerHost(
+    vm: AppViewModel,
+    lyrics: LyricsUi,
+    onOpenQueue: () -> Unit,
+    onCollapse: () -> Unit,
+) {
+    val playback by vm.playback.collectAsStateWithLifecycle()
+    FullPlayer(
+        state = playback,
+        lyrics = lyrics,
+        lyricsPositionMs = vm.lyricsPositionMs,
+        onTogglePlay = vm::togglePlayPause,
+        onNext = vm::nextTrack,
+        onPrevious = vm::previousTrack,
+        onSeek = vm::seekTo,
+        onToggleShuffle = vm::toggleShuffle,
+        onCycleRepeat = vm::cycleRepeatMode,
+        onOpenQueue = onOpenQueue,
+        onDownload = vm::downloadCurrentTrack,
+        onToggleLyrics = vm::toggleLyrics,
+        onReloadLyrics = vm::reloadLyrics,
+        onCollapse = onCollapse,
+    )
 }
