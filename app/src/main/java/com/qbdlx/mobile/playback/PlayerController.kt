@@ -12,6 +12,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 import com.qbdlx.mobile.api.Track
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -96,6 +97,15 @@ class PlayerController(
     /** How many upcoming tracks to resolve ahead, smoothing track transitions. */
     private val resolveAhead = 3
 
+    /**
+     * Tracks currently having their stream URL resolved.
+     *
+     * Callers are generous — the initial play, the look-ahead, and every
+     * media-item transition all ask — so without this the same track is resolved
+     * several times over and the playlist is mutated once per attempt.
+     */
+    private val resolving = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publish(player)
@@ -135,22 +145,41 @@ class PlayerController(
 
     // -------------------------------------------------------------- commands
 
-    /** Replaces the queue and starts playing [startIndex]. */
+    /**
+     * Replaces the queue and starts playing the track at [startIndex].
+     *
+     * The queue is rotated so the requested track is first, rather than being
+     * passed a start index. `MediaController.setMediaItems(items, startIndex, 0)`
+     * does not work here: the start index is applied to the controller's own
+     * copy of the playlist, then discarded when the session's real state arrives,
+     * leaving playback on the first track. Every corrective seek afterwards was
+     * discarded the same way. `setMediaItems(items)` without a start index does
+     * work, and always begins at the first item of the list it is given, so that
+     * is what is handed to it.
+     *
+     * The trade-off is that the queue runs from the tapped track to the end of
+     * the list and then wraps to the start, instead of keeping the list order.
+     */
     fun play(items: List<QueueItem>, startIndex: Int) {
         val c = controller ?: return
         if (items.isEmpty()) return
 
-        queue = items
         val index = startIndex.coerceIn(0, items.lastIndex)
+        val rotated = items.drop(index) + items.take(index)
 
-        val media = items.map { it.toMediaItem() }
-        c.setMediaItems(media, index, 0L)
+        queue = rotated
+        _state.update {
+            it.copy(error = null, current = rotated.firstOrNull(), isBuffering = true)
+        }
+
+        val media = rotated.map { it.toMediaItem() }
+        Log.i(TAG, "play: '${rotated.first().title}' then ${rotated.size - 1} more")
+        // No start index argument: that is the form that works. Handing
+        // setMediaItems a start index makes the whole command land wrong.
+        c.setMediaItems(media)
         c.prepare()
         c.play()
-        _state.update { it.copy(error = null, current = items.getOrNull(index)) }
 
-        // Resolve the starting track immediately; the rest follow as playback nears them.
-        scope.launch { resolveInto(c, index) }
         preResolveUpcoming(c)
     }
 
@@ -278,6 +307,18 @@ class PlayerController(
      *
      * The item is queued without a URI, so ExoPlayer cannot start it until this
      * completes — the UI shows a buffering state meanwhile.
+     *
+     * Two things here are load bearing:
+     *
+     *  - One resolution per track at a time. Three things call this (the initial
+     *    play, the look-ahead, and the media-item-transition event), so the same
+     *    track used to be resolved two or three times over, and every one of them
+     *    mutated the playlist again.
+     *  - A seek by index rather than by position when the current item is the one
+     *    being replaced. `replaceMediaItem` is remove-then-insert underneath, so
+     *    replacing the playing item drifts the current index; seeking by position
+     *    alone then applies to whatever item the player drifted onto. That is how
+     *    tapping the third track ended up playing the first one.
      */
     private suspend fun resolveInto(c: Player, index: Int) {
         if (index !in 0 until c.mediaItemCount) return
@@ -285,23 +326,49 @@ class PlayerController(
         if (item.localConfiguration?.uri != null) return
 
         val trackId = item.mediaId
-        val url = runCatching { resolveStreamUrl(trackId) }
-            .onFailure { Log.w(TAG, "could not resolve stream URL for $trackId", it) }
-            .getOrNull()
-            ?: run {
-                _state.update { it.copy(error = "Could not get a stream URL for this track.") }
-                return
+        if (!resolving.add(trackId)) return
+
+        try {
+            val url = runCatching { resolveStreamUrl(trackId) }
+                .onFailure { Log.w(TAG, "could not resolve stream URL for $trackId", it) }
+                .getOrNull()
+                ?: run {
+                    _state.update { it.copy(error = "Could not get a stream URL for this track.") }
+                    return
+                }
+
+            // The queue may have been replaced while the URL was in flight, so
+            // find the item again rather than trusting the index we came in with.
+            val at = (0 until c.mediaItemCount)
+                .firstOrNull { c.getMediaItemAt(it).mediaId == trackId }
+                ?: return
+            val target = c.getMediaItemAt(at)
+            if (target.localConfiguration?.uri != null) return
+
+            val withUri = target.buildUpon().setUri(Uri.parse(url)).build()
+            val wasCurrent = c.currentMediaItemIndex == at
+            val position = if (wasCurrent) c.currentPosition else 0L
+            val indexBefore = c.currentMediaItemIndex
+
+            c.replaceMediaItem(at, withUri)
+
+            // Replacing an item can drag the current index onto the replaced
+            // one, which is how resolving a look-ahead track used to yank
+            // playback back to the top of the queue. Put the player back where
+            // it was, by index and position, whenever that happens.
+            if (c.currentMediaItemIndex != indexBefore) {
+                val positionNow = if (wasCurrent) position else c.currentPosition
+                Log.i(TAG, "resolve: index moved $indexBefore -> ${c.currentMediaItemIndex}, restoring")
+                c.seekTo(indexBefore, positionNow.coerceAtLeast(0L))
+            } else if (wasCurrent) {
+                c.seekTo(position)
             }
 
-        // Re-create the item with the resolved URI, preserving metadata.
-        val withUri = item.buildUpon().setUri(Uri.parse(url)).build()
-        val wasCurrent = c.currentMediaItemIndex == index
-        val position = if (wasCurrent) c.currentPosition else 0L
-        c.replaceMediaItem(index, withUri)
-        if (wasCurrent) c.seekTo(position)
-
-        queue = queue.map { if (it.trackId == trackId) it.copy(streamUrl = url) else it }
-        Log.i(TAG, "resolved $trackId -> ${url.take(60)}")
+            queue = queue.map { if (it.trackId == trackId) it.copy(streamUrl = url) else it }
+            Log.i(TAG, "resolved $trackId -> ${url.take(60)}")
+        } finally {
+            resolving.remove(trackId)
+        }
     }
 
     /** Resolves the current and next few tracks so transitions are smooth. */
