@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.3
+
+A new app icon.
+
+The old one was two white music notes on a flat purple square. It said nothing
+about what the app is and looked like a default.
+
+It is now a "Q" — a ring with a diagonal tail — drawn in the app's own
+purple-to-cyan on a near-black gradient, with a soft purple glow behind the
+mark. It is an original mark rather than Qobuz's logo: this app is not
+affiliated with, endorsed by, or approved by Qobuz, and borrowing their actual
+logo would claim otherwise.
+
+Everything is vector, so it stays sharp at any size: adaptive background,
+foreground and monochrome layers, plus an Android 13 themed-icon layer that the
+system recolours to match the wallpaper. The raster fallbacks are generated too,
+by tools/gen_icon.py, which is committed alongside them so the icon can be
+regenerated rather than hand-edited.
+
 ## 1.9.2
 
 Downloads work again. They were being signed with the wrong app secret.
