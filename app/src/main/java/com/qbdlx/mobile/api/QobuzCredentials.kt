@@ -7,13 +7,20 @@ import java.util.concurrent.TimeUnit
 /**
  * Qobuz ships its API credentials inside the web-player JavaScript bundle.
  *
- * Up to and including bundle 7.x the bundle only exposed `appId`, and the
- * `appSecret` had to be reconstructed by de-obfuscating the timezone table
+ * The `appSecret` has to be reconstructed by de-obfuscating the timezone table
  * (the technique QopenAPI uses: concatenate seed+info+extras, drop the last 44
- * chars, base64-decode). As of bundle 8.x Qobuz leaves both values in the clear
- * as `appSecret:"<32 hex>"` right next to `appId`, which is both simpler and
- * more reliable. We therefore try the direct route first and fall back to the
- * historical de-obfuscation.
+ * chars, base64-decode).
+ *
+ * Bundle 8.x also exposes a literal `appSecret:"<32 hex>"` right next to
+ * `appId`. That value is *not* the signing secret. Signing `track/getFileUrl`
+ * with it is rejected with
+ *
+ *   HTTP 400 Invalid Request Signature parameter (request_sig)
+ *
+ * whereas a `request_sig` built from the de-obfuscated secret passes signature
+ * validation and the call proceeds (it then fails only on authentication if the
+ * token is wrong). The literal pair is therefore used only as a last resort, if
+ * the timezone table cannot be read at all.
  */
 class QobuzCredentials(
     private val http: OkHttpClient = defaultClient(),
@@ -55,25 +62,31 @@ class QobuzCredentials(
     }
 
     internal fun parseBundle(js: String, bundleUrl: String): Credentials {
-        // Preferred path: appId + appSecret sitting side by side (bundle 8.x+).
+        val appId = appIdSecretRegex.find(js)?.groups?.get("appID")?.value
+            ?: appIdRegex.find(js)?.groups?.get("appID")?.value
+            ?: throw QobuzApiException.CredentialsUnavailable(
+                "Could not extract app_id from the Qobuz bundle."
+            )
+
+        // Preferred: the de-obfuscated secret, which is the one the API
+        // validates a `request_sig` against.
+        deriveSecretFromTimezoneTable(js)?.let { secret ->
+            return Credentials(appId, secret, bundleUrl)
+        }
+
+        // Last resort: the plaintext pair that bundle 8.x+ carries. Kept only so
+        // that a future bundle without a readable timezone table still yields
+        // something; requests signed with it are likely to be rejected.
         appIdSecretRegex.find(js)?.let { m ->
-            val appId = m.groups["appID"]?.value
             val secret = m.groups["appSecret"]?.value
-            if (!appId.isNullOrBlank() && !secret.isNullOrBlank() && secret.length in 16..128) {
+            if (!secret.isNullOrBlank() && secret.length in 16..128) {
                 return Credentials(appId, secret, bundleUrl)
             }
         }
 
-        // Fallback: appId only, derive the secret from the timezone table.
-        val appId = appIdRegex.find(js)?.groups?.get("appID")?.value
-            ?: throw QobuzApiException.CredentialsUnavailable(
-                "Could not extract app_id from the Qobuz bundle."
-            )
-        val secret = deriveSecretFromTimezoneTable(js)
-            ?: throw QobuzApiException.CredentialsUnavailable(
-                "Found app_id ($appId) but could not derive app_secret from the bundle."
-            )
-        return Credentials(appId, secret, bundleUrl)
+        throw QobuzApiException.CredentialsUnavailable(
+            "Found app_id ($appId) but could not derive app_secret from the bundle."
+        )
     }
 
     internal fun deriveSecretFromTimezoneTable(js: String): String? {
@@ -89,7 +102,10 @@ class QobuzCredentials(
         return try {
             val decoded = android.util.Base64.decode(trimmed, android.util.Base64.DEFAULT)
             String(decoded, Charsets.UTF_8).trim().ifBlank { null }
-        } catch (_: IllegalArgumentException) {
+        } catch (_: Exception) {
+            // Deliberately broad: on the JVM unit tests android.util.Base64 is a
+            // stub that returns null, so String(null, ...) throws NPE rather
+            // than IllegalArgumentException.
             null
         }
     }
