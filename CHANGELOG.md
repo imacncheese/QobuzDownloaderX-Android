@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.9.2
+
+Downloads work again. They were being signed with the wrong app secret.
+
+### Downloads
+
+Every download failed with
+
+    Qobuz returned HTTP 400. Invalid Request Signature parameter (request_sig)
+
+Sign-in, search and browsing were all fine, which is what made this look like a
+Qobuz outage rather than a bug in the app.
+
+Qobuz does not publish API credentials, so they are scraped from the web
+player's bundle at runtime. Bundle 8.x exposes an `appSecret` in the clear right
+next to `appId`, and that literal value was preferred over the secret
+de-obfuscated from the bundle's timezone table. It is not the signing secret.
+`request_sig` is an MD5 over the request parameters plus that secret, so every
+`track/getFileUrl` call was signed with the wrong key and rejected before the
+auth token was ever looked at.
+
+Established against the live API by sending a deliberately invalid token, which
+separates the signature check from authentication and turns the response into an
+oracle:
+
+    literal bundle secret  -> HTTP 400 Invalid Request Signature parameter
+    de-obfuscated secret   -> HTTP 401 User authentication is required
+
+The 401 is the signature being accepted. The de-obfuscated secret is used now,
+and the literal pair is only a fallback for a bundle whose timezone table cannot
+be read.
+
+One catch was widened along the way: on the JVM unit tests `android.util.Base64`
+is a stub that returns null, so the fallback path threw NPE rather than
+returning null.
+
 ## 1.9.1
 
 Lyrics fixes, and playback now recovers when the service goes away.
